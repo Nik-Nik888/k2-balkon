@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>К2 Балкон — Расчёт материалов</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0D1117;--card:#161B22;--card2:#1C2333;
+    --border:#30363D;--border-active:#58A6FF;
+    --accent:#58A6FF;--accent-soft:rgba(88,166,255,0.12);--accent-glow:rgba(88,166,255,0.25);
+    --success:#3FB950;--success-soft:rgba(63,185,80,0.12);
+    --warning:#D29922;--warning-soft:rgba(210,153,34,0.12);
+    --danger:#F85149;--danger-soft:rgba(248,81,73,0.12);
+    --orange:#F0883E;--orange-soft:rgba(240,136,62,0.12);
+    --text:#E6EDF3;--text-muted:#8B949E;--text-dim:#484F58;
+    --font:'Outfit',sans-serif;--mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);font-family:var(--font);color:var(--text);-webkit-font-smoothing:antialiased}
+  input[type="number"]::-webkit-inner-spin-button{opacity:1}
+  select option{background:var(--bg);color:var(--text)}
+  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+  .price-tag{color:var(--orange);font-family:var(--mono);font-size:12px;font-weight:600}
+  .cost-tag{color:var(--success);font-family:var(--mono);font-size:12px;font-weight:600}
+  /* Tree */
+  .tree-lvl{margin-left:16px;border-left:1px dashed var(--border);padding-left:12px}
+  .tree-node{padding:6px 0}
+  .tree-toggle{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:6px 10px;border-radius:8px;transition:background .15s}
+  .tree-toggle:hover{background:var(--accent-soft)}
+  .tree-arrow{font-size:10px;color:var(--text-dim);transition:transform .2s;width:14px;text-align:center;flex-shrink:0}
+  .tree-arrow.open{transform:rotate(90deg)}
+  .tree-label{font-size:13px;font-weight:500;flex:1}
+  .tree-count{font-size:11px;color:var(--text-dim);font-family:var(--mono)}
+  .tree-actions{display:flex;gap:4px}
+  .tree-btn{background:none;border:none;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px;transition:background .15s;color:var(--text-muted)}
+  .tree-btn:hover{background:var(--accent-soft);color:var(--accent)}
+  .tree-btn.del:hover{background:var(--danger-soft);color:var(--danger)}
+  .tree-mat{display:flex;align-items:center;gap:8px;padding:5px 10px;margin:2px 0;border-radius:8px;background:var(--bg);font-size:12px;flex-wrap:wrap}
+  .tree-mat .nm{flex:1;min-width:100px}
+  .tree-mat .vis-tag{font-size:10px;padding:1px 6px;border-radius:10px;font-weight:600}
+  .tree-mat .vis-tag.open{background:var(--success-soft);color:var(--success)}
+  .tree-mat .vis-tag.hidden{background:var(--warning-soft);color:var(--warning)}
+  /* Modal */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px)}
+  .modal-box{background:var(--card);border:1px solid var(--border);border-radius:16px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;padding:24px}
+  .modal-title{font-size:16px;font-weight:700;margin-bottom:16px}
+  .m-field{margin-bottom:10px}
+  .m-label{font-size:11px;color:var(--text-muted);margin-bottom:3px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  .m-inp{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:var(--font);font-size:13px;outline:none}
+  .m-inp:focus{border-color:var(--accent)}
+  .m-row{display:flex;gap:8px}
+  .m-btn{padding:10px 0;width:100%;background:var(--accent);color:var(--bg);border:none;border-radius:10px;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;margin-top:8px}
+  .m-btn:hover{opacity:.9}
+  .m-btn.ghost{background:transparent;color:var(--text-muted);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useMemo}=React;
+const sb=(window.supabase||window.Supabase).createClient(
+  "https://ynpqayssjwtlocncexgg.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlucHFheXNzand0bG9jbmNleGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NTEyNzMsImV4cCI6MjA4OTQyNzI3M30.IIz-QZ8i2bwrD4Ade-YcgI_hNAbp5XuMzQPLqnrS-cs"
+);
+
+const TABS=[
+  {id:"arrival",label:"На заезд",icon:"🚛"},
+  {id:"glazing",label:"Остекление",icon:"🪟"},
+  {id:"main_wall",label:"Главная стена",icon:"🧱"},
+  {id:"facade_wall",label:"Фасадная стена",icon:"🏗"},
+  {id:"bl_wall",label:"БЛ стена",icon:"◧"},
+  {id:"bp_wall",label:"БП стена",icon:"◨"},
+  {id:"ceiling",label:"Потолок",icon:"⬆"},
+  {id:"floor",label:"Полы",icon:"⬇"},
+  {id:"electric",label:"Электрика",icon:"⚡"},
+  {id:"furniture",label:"Мебель",icon:"🪑"},
+  {id:"extras",label:"Доп. параметр",icon:"➕"},
+];
+const SURFACE_IDS=["main_wall","facade_wall","bl_wall","bp_wall","ceiling","floor"];
+const UNITS=["шт.","п.м.","м²","л.","уп.","кг","компл."];
+
+// ── DB ──
+async function loadAll(){
+  const[mR,cR,oR,omR]=await Promise.all([
+    sb.from("materials").select("*").order("name"),
+    sb.from("categories").select("*").order("sort_order"),
+    sb.from("category_options").select("*").order("sort_order"),
+    sb.from("option_materials").select("*,materials(*)"),
+  ]);
+  [mR,cR,oR,omR].forEach(r=>{if(r.error)throw r.error});
+  return{materials:mR.data||[],categories:cR.data||[],options:oR.data||[],optionMaterials:omR.data||[]};
+}
+
+// ── UI Components ──
+function Sec({title,icon,children,open:dflt,badge}){
+  const[o,setO]=useState(!!dflt);
+  return(<div style={{background:"var(--card)",borderRadius:16,border:`1px solid ${o?"var(--border-active)":"var(--border)"}`,marginBottom:14,overflow:"hidden",transition:"border-color .3s",boxShadow:o?"0 0 20px var(--accent-glow)":"none"}}>
+    <div onClick={()=>setO(!o)} style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",cursor:"pointer",userSelect:"none"}}>
+      <span style={{fontSize:22}}>{icon}</span><span style={{flex:1,fontSize:16,fontWeight:600}}>{title}</span>
+      {badge&&<span style={{background:"var(--orange)",color:"var(--bg)",fontSize:11,fontWeight:700,fontFamily:"var(--mono)",padding:"2px 8px",borderRadius:10}}>{badge}</span>}
+      <span style={{transform:o?"rotate(180deg)":"rotate(0)",transition:"transform .3s",fontSize:13,color:"var(--text-muted)"}}>▼</span>
+    </div>
+    {o&&<div style={{padding:"0 18px 18px",animation:"fadeIn .3s"}}>{children}</div>}
+  </div>);
+}
+
+function Tog({label,value,onChange}){
+  return(<div onClick={()=>onChange(!value)} style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",padding:"10px 0",userSelect:"none"}}>
+    <div style={{width:46,height:26,borderRadius:13,flexShrink:0,background:value?"var(--accent)":"var(--border)",position:"relative",transition:"background .25s"}}>
+      <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:value?23:3,transition:"left .25s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+    </div><span style={{fontSize:15}}>{label}</span>
+  </div>);
+}
+
+function NI({label,value,onChange,unit}){
+  return(<div style={{marginBottom:8}}>
+    {label&&<div style={{color:"var(--text-muted)",fontSize:12,marginBottom:3}}>{label}</div>}
+    <div style={{display:"flex",alignItems:"center",gap:6}}>
+      <input type="number" min="0" value={value||""} placeholder="0" onChange={e=>onChange(Number(e.target.value)||0)}
+        style={{width:110,padding:"9px 12px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,color:"var(--text)",fontFamily:"var(--mono)",fontSize:14,outline:"none"}}
+        onFocus={e=>e.target.style.borderColor="var(--accent)"} onBlur={e=>e.target.style.borderColor="var(--border)"}/>
+      <span style={{color:"var(--text-muted)",fontSize:12}}>{unit||"мм"}</span>
+    </div>
+  </div>);
+}
+
+function Sl({label,value,onChange,options}){
+  return(<div style={{marginBottom:10}}>
+    {label&&<div style={{color:"var(--text-muted)",fontSize:12,marginBottom:3}}>{label}</div>}
+    <select value={value||""} onChange={e=>onChange(e.target.value)} style={{width:"100%",maxWidth:320,padding:"9px 32px 9px 12px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,color:"var(--text)",fontFamily:"var(--font)",fontSize:13,outline:"none",cursor:"pointer",appearance:"none",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238B949E' viewBox='0 0 16 16'%3E%3Cpath d='M8 12L2 6h12z'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 12px center"}}>
+      {options.map((o,i)=>{const v=typeof o==="string"?o:o.value;const l=typeof o==="string"?o:o.label;return<option key={i} value={v}>{l}</option>})}
+    </select>
+  </div>);
+}
+
+function Ch({label,active,onClick}){
+  return(<button onClick={onClick} style={{padding:"7px 14px",borderRadius:20,border:`1px solid ${active?"var(--accent)":"var(--border)"}`,background:active?"var(--accent-soft)":"transparent",color:active?"var(--text)":"var(--text-muted)",fontFamily:"var(--font)",fontSize:13,fontWeight:active?600:400,cursor:"pointer",transition:"all .2s",whiteSpace:"nowrap"}}>{label}</button>);
+}
+
+function Notif({msg,type,onClose}){
+  useEffect(()=>{if(msg){const t=setTimeout(onClose,3000);return()=>clearTimeout(t)}},[msg]);
+  if(!msg)return null;
+  return(<div style={{position:"fixed",top:16,right:16,padding:"12px 20px",borderRadius:12,fontSize:14,fontWeight:500,zIndex:9999,display:"flex",alignItems:"center",gap:12,animation:"slideUp .3s",boxShadow:"0 8px 32px rgba(0,0,0,.4)",background:type==="error"?"var(--danger)":"var(--success)",color:"#fff"}}>
+    <span>{msg}</span><button onClick={onClose} style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:16,opacity:.8}}>✕</button>
+  </div>);
+}
+
+// ── Tree Справочник ──
+function TreeRef({db,refresh,notify}){
+  const[expanded,setExpanded]=useState({});
+  const[modal,setModal]=useState(null); // {type,parentId,...}
+  const tog=(key)=>setExpanded(p=>({...p,[key]:!p[key]}));
+  const isOpen=(key)=>!!expanded[key];
+
+  // Group data
+  const tabCats=useMemo(()=>{
+    const m={};
+    TABS.forEach(t=>{m[t.id]=db.categories.filter(c=>c.tab_id===t.id)});
+    return m;
+  },[db]);
+
+  const catOpts=useMemo(()=>{
+    const m={};
+    db.options.forEach(o=>{if(!m[o.category_id])m[o.category_id]=[];m[o.category_id].push(o)});
+    return m;
+  },[db]);
+
+  const optMats=useMemo(()=>{
+    const m={};
+    db.optionMaterials.forEach(om=>{if(!m[om.option_id])m[om.option_id]=[];m[om.option_id].push(om)});
+    return m;
+  },[db]);
+
+  // CRUD
+  const addCategory=async(tabId,name)=>{
+    if(!name.trim())return;
+    const sort=tabCats[tabId]?.length||0;
+    const{error}=await sb.from("categories").insert({tab_id:tabId,name:name.trim(),sort_order:sort+1});
+    if(error)return notify(error.message,"error");
+    notify("Категория создана");refresh();
+  };
+  const delCategory=async(id,name)=>{
+    if(!confirm(`Удалить «${name}» и все варианты внутри?`))return;
+    const{error}=await sb.from("categories").delete().eq("id",id);
+    if(error)return notify(error.message,"error");
+    notify("Удалено");refresh();
+  };
+  const addOption=async(catId,name)=>{
+    if(!name.trim())return;
+    const sort=(catOpts[catId]||[]).length;
+    const{error}=await sb.from("category_options").insert({category_id:catId,name:name.trim(),sort_order:sort+1});
+    if(error)return notify(error.message,"error");
+    notify("Вариант создан");refresh();
+  };
+  const delOption=async(id,name)=>{
+    if(!confirm(`Удалить «${name}»?`))return;
+    const{error}=await sb.from("category_options").delete().eq("id",id);
+    if(error)return notify(error.message,"error");
+    notify("Удалено");refresh();
+  };
+  const addBinding=async(optionId,materialId,qty,visible)=>{
+    const{error}=await sb.from("option_materials").insert({option_id:optionId,material_id:materialId,quantity:qty,visible});
+    if(error)return notify(error.message,"error");
+    notify("Материал привязан");refresh();
+  };
+  const delBinding=async(id)=>{
+    const{error}=await sb.from("option_materials").delete().eq("id",id);
+    if(error)return notify(error.message,"error");
+    notify("Удалено");refresh();
+  };
+  const addMaterial=async(data)=>{
+    const{error}=await sb.from("materials").insert(data);
+    if(error)return notify(error.message,"error");
+    notify("Материал добавлен");refresh();
+  };
+
+  return(<div>
+    {/* Quick add material button */}
+    <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+      <button onClick={()=>setModal({type:"material"})} style={{padding:"8px 16px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>➕ Новый материал</button>
+      <div style={{fontSize:12,color:"var(--text-dim)",display:"flex",alignItems:"center",gap:4}}>
+        📦 {db.materials.length} материалов
+      </div>
+    </div>
+
+    {/* TREE */}
+    {TABS.map(tab=>{
+      const tKey=`tab_${tab.id}`;
+      const cats=tabCats[tab.id]||[];
+      return(<div key={tab.id} className="tree-node">
+        <div className="tree-toggle" onClick={()=>tog(tKey)}>
+          <span className={`tree-arrow${isOpen(tKey)?" open":""}`}>▶</span>
+          <span style={{fontSize:18}}>{tab.icon}</span>
+          <span className="tree-label" style={{fontWeight:600,fontSize:14}}>{tab.label}</span>
+          <span className="tree-count">{cats.length} кат.</span>
+          <div className="tree-actions" onClick={e=>e.stopPropagation()}>
+            <button className="tree-btn" title="Добавить категорию" onClick={()=>setModal({type:"category",tabId:tab.id,tabLabel:tab.label})}>＋</button>
+          </div>
+        </div>
+
+        {isOpen(tKey)&&<div className="tree-lvl">
+          {cats.map(cat=>{
+            const cKey=`cat_${cat.id}`;
+            const opts=catOpts[cat.id]||[];
+            return(<div key={cat.id} className="tree-node">
+              <div className="tree-toggle" onClick={()=>tog(cKey)}>
+                <span className={`tree-arrow${isOpen(cKey)?" open":""}`}>▶</span>
+                <span className="tree-label" style={{color:"var(--accent)"}}>{cat.name}</span>
+                <span className="tree-count">{opts.length} вар.</span>
+                <div className="tree-actions" onClick={e=>e.stopPropagation()}>
+                  <button className="tree-btn" title="Добавить вариант" onClick={()=>setModal({type:"option",catId:cat.id,catName:cat.name})}>＋</button>
+                  <button className="tree-btn del" title="Удалить категорию" onClick={()=>delCategory(cat.id,cat.name)}>✕</button>
+                </div>
+              </div>
+
+              {isOpen(cKey)&&<div className="tree-lvl">
+                {opts.map(opt=>{
+                  const oKey=`opt_${opt.id}`;
+                  const mats=optMats[opt.id]||[];
+                  const hiddenCount=mats.filter(m=>!m.visible).length;
+                  const openCount=mats.filter(m=>m.visible).length;
+                  return(<div key={opt.id} className="tree-node">
+                    <div className="tree-toggle" onClick={()=>tog(oKey)}>
+                      <span className={`tree-arrow${isOpen(oKey)?" open":""}`}>▶</span>
+                      <span className="tree-label">{opt.name}</span>
+                      <span className="tree-count">
+                        {openCount>0&&<span style={{color:"var(--success)"}}>👁{openCount}</span>}
+                        {hiddenCount>0&&<span style={{color:"var(--warning)",marginLeft:4}}>🔒{hiddenCount}</span>}
+                      </span>
+                      <div className="tree-actions" onClick={e=>e.stopPropagation()}>
+                        <button className="tree-btn" title="Привязать материал" onClick={()=>setModal({type:"binding",optionId:opt.id,optionName:opt.name})}>＋</button>
+                        <button className="tree-btn del" title="Удалить вариант" onClick={()=>delOption(opt.id,opt.name)}>✕</button>
+                      </div>
+                    </div>
+
+                    {isOpen(oKey)&&<div className="tree-lvl">
+                      {mats.length===0&&<div style={{fontSize:12,color:"var(--text-dim)",padding:"4px 10px"}}>Нет материалов</div>}
+                      {mats.map(om=>(
+                        <div key={om.id} className="tree-mat">
+                          <span className={`vis-tag ${om.visible?"open":"hidden"}`}>{om.visible?"👁":"🔒"}</span>
+                          <span className="nm">{om.materials?.name||"?"}</span>
+                          <span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text-muted)"}}>{om.quantity} {om.materials?.unit}</span>
+                          {om.materials?.price>0&&<span className="price-tag">{om.materials.price}₽</span>}
+                          <button className="tree-btn del" onClick={()=>delBinding(om.id)}>✕</button>
+                        </div>
+                      ))}
+                    </div>}
+                  </div>);
+                })}
+                {opts.length===0&&<div style={{fontSize:12,color:"var(--text-dim)",padding:"4px 10px"}}>Нет вариантов</div>}
+              </div>}
+            </div>);
+          })}
+          {cats.length===0&&<div style={{fontSize:12,color:"var(--text-dim)",padding:"4px 10px"}}>Нет категорий</div>}
+        </div>}
+      </div>);
+    })}
+
+    {/* MODALS */}
+    {modal&&modal.type==="category"&&<ModalAddSimple title={`Новая категория в «${modal.tabLabel}»`} placeholder="Название категории" onSave={(name)=>{addCategory(modal.tabId,name);setModal(null)}} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="option"&&<ModalAddSimple title={`Новый вариант в «${modal.catName}»`} placeholder="Название (ДА, НЕТ, Балкон 3м...)" onSave={(name)=>{addOption(modal.catId,name);setModal(null)}} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="binding"&&<ModalAddBinding title={`Привязка к «${modal.optionName}»`} materials={db.materials} onSave={(matId,qty,vis)=>{addBinding(modal.optionId,matId,qty,vis);setModal(null)}} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="material"&&<ModalAddMaterial onSave={(d)=>{addMaterial(d);setModal(null)}} onClose={()=>setModal(null)}/>}
+  </div>);
+}
+
+function ModalAddSimple({title,placeholder,onSave,onClose}){
+  const[v,setV]=useState("");
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div className="modal-title">{title}</div>
+      <input className="m-inp" placeholder={placeholder} value={v} onChange={e=>setV(e.target.value)} autoFocus onKeyDown={e=>{if(e.key==="Enter"&&v.trim())onSave(v)}}/>
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button className="m-btn" onClick={()=>{if(v.trim())onSave(v)}} style={{flex:1}}>Добавить</button>
+        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+      </div>
+    </div>
+  </div>);
+}
+
+function ModalAddBinding({title,materials,onSave,onClose}){
+  const[matId,setMatId]=useState("");
+  const[qty,setQty]=useState(1);
+  const[vis,setVis]=useState(false);
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div className="modal-title">{title}</div>
+      <div className="m-field"><div className="m-label">Материал</div>
+        <select className="m-inp" value={matId} onChange={e=>setMatId(e.target.value)}>
+          <option value="">Выберите</option>
+          {materials.map(m=><option key={m.id} value={m.id}>{m.name} — {m.price||0}₽/{m.unit}</option>)}
+        </select>
+      </div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Количество</div><input type="number" className="m-inp" value={qty} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step="0.1"/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Тип</div>
+          <select className="m-inp" value={vis?"open":"hidden"} onChange={e=>setVis(e.target.value==="open")}>
+            <option value="hidden">🔒 Закрытый (авто)</option>
+            <option value="open">👁 Открытый</option>
+          </select>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:"var(--text-dim)",marginTop:6,lineHeight:1.5}}>
+        <b>Закрытый</b> — добавляется автоматически при выборе варианта (не видно пользователю)<br/>
+        <b>Открытый</b> — пользователь видит и может менять количество
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button className="m-btn" onClick={()=>{if(matId)onSave(Number(matId),qty,vis)}} style={{flex:1}}>Привязать</button>
+        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+      </div>
+    </div>
+  </div>);
+}
+
+function ModalAddMaterial({onSave,onClose}){
+  const[f,setF]=useState({name:"",color:"",dimensions:"",price:0,stock:0,unit:"шт."});
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div className="modal-title">➕ Новый материал</div>
+      <div className="m-field"><div className="m-label">Название</div><input className="m-inp" value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="Вагонка сосна АВ 3м" autoFocus/></div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Цвет</div><input className="m-inp" value={f.color} onChange={e=>setF({...f,color:e.target.value})} placeholder="Натуральный"/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Размеры мм</div><input className="m-inp" value={f.dimensions} onChange={e=>setF({...f,dimensions:e.target.value})} placeholder="3000x96x12"/></div>
+      </div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Цена ₽</div><input type="number" className="m-inp" value={f.price||""} onChange={e=>setF({...f,price:Number(e.target.value)||0})} min="0"/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Остаток</div><input type="number" className="m-inp" value={f.stock||""} onChange={e=>setF({...f,stock:Number(e.target.value)||0})} min="0"/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Единица</div>
+          <select className="m-inp" value={f.unit} onChange={e=>setF({...f,unit:e.target.value})}>{UNITS.map(u=><option key={u}>{u}</option>)}</select>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button className="m-btn" onClick={()=>{if(f.name.trim())onSave({name:f.name.trim(),color:f.color,dimensions:f.dimensions,price:f.price,stock:f.stock,unit:f.unit})}} style={{flex:1}}>Добавить</button>
+        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+      </div>
+    </div>
+  </div>);
+}
+
+// ── Dynamic Tab Content ──
+function DynTab({tabId,db,sel,setSel}){
+  const tabCats=useMemo(()=>db.categories.filter(c=>c.tab_id===tabId),[db,tabId]);
+  const isSurface=SURFACE_IDS.includes(tabId);
+  const isFloor=tabId==="floor";
+  const dims=(sel[tabId]||{})._dims||{length:0,height:0};
+  const area=isSurface?(dims.length/1000)*(dims.height/1000):0;
+
+  const setDim=(k,v)=>setSel(p=>({...p,[tabId]:{...p[tabId],_dims:{...dims,[k]:v}}}));
+  const setOpt=(catId,optId)=>setSel(p=>({...p,[tabId]:{...p[tabId],[catId]:optId?Number(optId):null}}));
+  const getOpt=(catId)=>(sel[tabId]||{})[catId]||null;
+  const setQty=(catId,matId,q)=>setSel(p=>({...p,[tabId]:{...p[tabId],[`_q_${catId}_${matId}`]:q}}));
+  const getQty=(catId,matId,def)=>{const v=(sel[tabId]||{})[`_q_${catId}_${matId}`];return v!==undefined?v:def};
+
+  return(<div>
+    {isSurface&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+      <NI label={isFloor?"Длина":"Высота"} value={dims.height} onChange={v=>setDim("height",v)}/>
+      <NI label={isFloor?"Ширина":"Ширина"} value={dims.length} onChange={v=>setDim("length",v)}/>
+      {area>0&&<div style={{background:"var(--accent-soft)",color:"var(--accent)",fontFamily:"var(--mono)",fontSize:14,fontWeight:700,padding:"8px 14px",borderRadius:10,alignSelf:"flex-end",marginBottom:8}}>{area.toFixed(2)} м²</div>}
+    </div>}
+
+    {tabCats.map(cat=>{
+      const opts=db.options.filter(o=>o.category_id===cat.id);
+      const selectedId=getOpt(cat.id);
+      const selectedOpt=opts.find(o=>o.id===selectedId);
+      const mats=selectedOpt?db.optionMaterials.filter(om=>om.option_id===selectedOpt.id):[];
+      const visibleMats=mats.filter(m=>m.visible);
+      const hiddenMats=mats.filter(m=>!m.visible);
+      const isFinish=isSurface&&cat.name==="Вид отделки";
+      const isInsul=isSurface&&cat.name==="Утепление";
+
+      return(<div key={cat.id} style={{marginBottom:14}}>
+        <Sl label={cat.name} value={selectedId||""} onChange={v=>setOpt(cat.id,v)}
+          options={[{value:"",label:"— Не выбрано —"},...opts.map(o=>({value:o.id,label:o.name}))]}/>
+
+        {/* Для отделки поверхности: показать авто-расчёт */}
+        {isFinish&&selectedOpt&&selectedOpt.name!=="Нет"&&area>0&&visibleMats.map(om=>{
+          const autoQty=calcMatQty(area, om.materials?.dimensions);
+          const reykaQty=calcReyka(dims.height,dims.length);
+          const paintQty=calcPaint(area);
+          const trimQty=calcTrim(dims.height,dims.length);
+          return(<div key={om.id} style={{background:"var(--bg)",borderRadius:12,padding:12,marginTop:6,border:"1px solid var(--border)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--accent)"}}>{om.materials?.name}</span>
+              <span style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,color:"var(--success)"}}>{autoQty} шт.</span>
+            </div>
+            {om.materials?.price>0&&<div style={{fontSize:12,color:"var(--text-dim)",marginBottom:4}}>
+              {om.materials.price}₽ × {autoQty} = <span className="cost-tag">{(om.materials.price*autoQty).toLocaleString("ru")}₽</span>
+            </div>}
+            <details style={{marginTop:6}}>
+              <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600}}>⚙ Черновые материалы</summary>
+              <div style={{marginTop:4}}>
+                {[{n:"Рейка 20х40х3000 мм",q:reykaQty,u:"шт."},
+                  ...(!isFloor?[{n:"Уголок хвоя 40х40х2500 мм",q:3,u:"шт."},{n:"Раскладка хвоя 40х40х2500 мм",q:trimQty,u:"п.м."}]:[]),
+                  ...(isFloor?[{n:"Брус 50х50х3000 мм (лаги)",q:calcFloorExtras(dims.length,dims.height).brus,u:"шт."},{n:"ОСБ 2500х1250х12 мм",q:Math.ceil(area),u:"м²"},{n:"Плинтуса",q:Math.round(calcFloorExtras(dims.length,dims.height).plintus*10)/10,u:"п.м."}]:[]),
+                  ...(tabId==="ceiling"?[{n:"П-профиль",q:Math.ceil(2*(dims.length/1000+dims.height/1000)),u:"п.м."}]:[]),
+                ].map((r,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"3px 10px",fontSize:12,color:"var(--text-muted)",borderRadius:6,background:"var(--card)",marginBottom:2}}>
+                    <span>{r.n}</span><span style={{fontFamily:"var(--mono)"}}>{r.q} {r.u}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>);
+        })}
+
+        {/* Утепление: авто-расчёт по площади */}
+        {isInsul&&selectedOpt&&selectedOpt.name!=="Нет"&&area>0&&visibleMats.map(om=>{
+          const autoQty=calcInsulation(area);
+          return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",background:"var(--bg)",borderRadius:10,marginBottom:4,flexWrap:"wrap"}}>
+            <span style={{flex:1,fontSize:13,color:"var(--text-muted)"}}>{om.materials?.name}</span>
+            <span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:600,color:"var(--success)"}}>{autoQty} шт.</span>
+            {om.materials?.price>0&&<span className="cost-tag">{((om.materials?.price||0)*autoQty).toLocaleString("ru")}₽</span>}
+          </div>);
+        })}
+
+        {/* Стандартные открытые материалы (не отделка/утепление поверхностей) */}
+        {!isFinish&&!isInsul&&visibleMats.map(om=>(
+          <div key={om.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",background:"var(--bg)",borderRadius:10,marginBottom:4,flexWrap:"wrap"}}>
+            <span style={{flex:1,fontSize:13,color:"var(--text-muted)",minWidth:120}}>{om.materials?.name}</span>
+            {om.materials?.price>0&&<span className="price-tag">{om.materials.price}₽/{om.materials.unit}</span>}
+            <input type="number" min="0" value={getQty(cat.id,om.material_id,om.quantity)||""} onChange={e=>setQty(cat.id,om.material_id,Number(e.target.value)||0)}
+              style={{width:80,padding:"6px 10px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"var(--mono)",fontSize:13,outline:"none",textAlign:"right"}}/>
+            <span style={{fontSize:11,color:"var(--text-dim)"}}>{om.materials?.unit}</span>
+          </div>
+        ))}
+
+        {/* Закрытые (авто) */}
+        {hiddenMats.length>0&&<details style={{marginTop:4}}>
+          <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600,padding:"4px 0"}}>🔒 Авто-материалы ({hiddenMats.length})</summary>
+          {hiddenMats.map(om=>(
+            <div key={om.id} style={{display:"flex",justifyContent:"space-between",padding:"3px 10px",fontSize:12,color:"var(--text-muted)",borderRadius:6,background:"var(--card)",marginBottom:2,gap:4,flexWrap:"wrap"}}>
+              <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
+              <span style={{fontFamily:"var(--mono)"}}>{om.quantity} {om.materials?.unit}</span>
+              {om.materials?.price>0&&<span className="price-tag" style={{fontSize:11}}>{om.materials.price}₽</span>}
+              <span className="cost-tag" style={{fontSize:11}}>={((om.materials?.price||0)*om.quantity).toLocaleString("ru")}₽</span>
+            </div>
+          ))}
+        </details>}
+      </div>);
+    })}
+    {tabCats.length===0&&<div style={{color:"var(--text-dim)",fontSize:14,padding:16,textAlign:"center"}}>Нет категорий. Добавьте через Справочник.</div>}
+  </div>);
+}
+
+// ── Parse dimensions "3000*110" -> {d:3000,s:110} ──
+function parseDims(s){
+  if(!s)return{d:0,s:0};
+  const p=String(s).replace(/\s/g,"").split(/[x*×хХ]/i).map(Number).filter(n=>n>0);
+  return{d:p[0]||0,s:p[1]||0};
+}
+
+// ── Calculate material qty by area and material dimensions ──
+// Formula from Excel: qty = ceil(area_mm2 / (mat_d * mat_s))
+function calcMatQty(areaSqm, matDims){
+  const md=parseDims(matDims);
+  if(md.d<=0||md.s<=0)return 0;
+  const matAreaMm2=md.d*md.s;
+  const areaMm2=areaSqm*1e6;
+  return Math.ceil(areaMm2/matAreaMm2);
+}
+
+// ── Reyка count: through every 50cm ──
+// Excel: "3 шт через 50 см" for a wall
+function calcReyka(heightMm, widthMm, direction){
+  // direction: Горизонтально -> рейки вертикально через 50см по ширине + 1 снизу + 1 сверху = count по ширине
+  // Вертикально -> рейки горизонтально через 50см по высоте
+  // From Excel: always seems to be ~3 for small walls, scales with larger
+  const h=heightMm/1000, w=widthMm/1000;
+  // шаг 500мм, кол-во = ceil(длина_рейки / 0.5) + 1, но нам нужно кол-во 3м реек
+  // Из Excel: для стены 3000x1000 = 3шт, для 1000x3000 = 3шт
+  // Логика: количество рядов обрешётки = ceil(max(h,w)/0.5)+1, 
+  // длина одного ряда = min(h,w), общая длина = ряды * min / 3000 (длина рейки)
+  const rows = Math.ceil(Math.max(h,w)/0.5)+1;
+  const rowLen = Math.min(h,w);
+  const totalM = rows * rowLen;
+  return Math.ceil(totalM / 3); // 3м рейки
+}
+
+// ── Краска: 1л на 7м² (в 2 слоя → 2/7 ≈ 0.29 л/м²) ──
+function calcPaint(areaSqm){return Math.ceil(areaSqm / 7 * 2)}
+
+// ── Раскладка/Уголок по периметру ──
+function calcTrim(heightMm, widthMm){
+  const perimM = 2*(heightMm/1000 + widthMm/1000);
+  return Math.ceil(perimM);
+}
+
+// ── Утеплитель по площади: лист 1200*600 = 0.72м² ──
+function calcInsulation(areaSqm, thickness){
+  const sheetArea = 1.2 * 0.6; // 0.72 m²
+  return Math.ceil(areaSqm / sheetArea);
+}
+
+// ── Пол: брус 50x50, ОСБ, плинтус ──
+function calcFloorExtras(lengthMm, widthMm){
+  const area = (lengthMm/1000)*(widthMm/1000);
+  const perim = 2*(lengthMm/1000 + widthMm/1000);
+  return{
+    brus: Math.ceil(Math.max(lengthMm,widthMm)/1000 / 0.5)+1, // через 50см
+    osb: area, // м²
+    plintus: perim // п.м.
+  };
+}
+
+// ── Main calculation ──
+function doCalc(sel,db){
+  const res={};
+  TABS.forEach(tab=>{
+    const items=[];
+    const ts=sel[tab.id]||{};
+    const dims=ts._dims||{};
+    const isSurface=SURFACE_IDS.includes(tab.id);
+    const isFloor=tab.id==="floor";
+    const heightMm=dims.height||0;
+    const widthMm=dims.length||0;
+    const areaSqm=(heightMm/1000)*(widthMm/1000);
+
+    const cats=db.categories.filter(c=>c.tab_id===tab.id);
+    cats.forEach(cat=>{
+      const optId=ts[cat.id];
+      if(!optId)return;
+      const opt=db.options.find(o=>o.id===optId);
+      if(!opt||opt.name==="Нет"||opt.name==="НЕТ")return;
+
+      const mats=db.optionMaterials.filter(om=>om.option_id===optId);
+
+      // ── Вид отделки для поверхностей: авто-расчёт по площади ──
+      if(isSurface && cat.name==="Вид отделки" && areaSqm>0){
+        mats.forEach(om=>{
+          const mat=om.materials;if(!mat)return;
+          // Рассчитываем кол-во чистового материала по размерам из каталога
+          let qty=calcMatQty(areaSqm, mat.dimensions);
+          if(om.visible){const uq=ts[`_q_${cat.id}_${om.material_id}`];if(uq!==undefined)qty=uq}
+          if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+        });
+        // Авто-добавляем обрешётку
+        const reykaQty=calcReyka(heightMm,widthMm);
+        if(reykaQty>0)items.push({name:"Рейка 20х40х3000 мм",qty:reykaQty,unit:"шт.",price:0,cost:0,auto:true});
+        // Уголок хвоя (по углам стены ≈ 3шт стандарт)
+        if(!isFloor){
+          items.push({name:"Уголок хвоя 40х40х2500 мм",qty:3,unit:"шт.",price:0,cost:0,auto:true});
+          // Раскладка по периметру
+          const trimM=calcTrim(heightMm,widthMm);
+          if(trimM>0)items.push({name:"Раскладка хвоя 40х40х2500 мм",qty:trimM,unit:"п.м.",price:0,cost:0,auto:true});
+        }
+        // Пол — доп. материалы
+        if(isFloor && areaSqm>0){
+          const fe=calcFloorExtras(widthMm,heightMm);
+          items.push({name:"Брус 50х50х3000 мм (лаги)",qty:fe.brus,unit:"шт.",price:0,cost:0,auto:true});
+          items.push({name:"ОСБ 2500х1250х12 мм",qty:Math.ceil(fe.osb),unit:"м²",price:0,cost:0,auto:true});
+          items.push({name:"Плинтуса",qty:Math.round(fe.plintus*10)/10,unit:"п.м.",price:0,cost:0,auto:true});
+        }
+        // Потолок — П-профиль
+        if(tab.id==="ceiling" && areaSqm>0){
+          const pprofM=2*(widthMm/1000 + heightMm/1000);
+          items.push({name:"П-профиль",qty:Math.ceil(pprofM),unit:"п.м.",price:0,cost:0,auto:true});
+        }
+        return; // done with this category
+      }
+
+      // ── Утепление: авто-расчёт по площади ──
+      if(isSurface && cat.name==="Утепление" && areaSqm>0){
+        mats.forEach(om=>{
+          const mat=om.materials;if(!mat)return;
+          let qty=calcInsulation(areaSqm);
+          if(om.visible){const uq=ts[`_q_${cat.id}_${om.material_id}`];if(uq!==undefined)qty=uq}
+          if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+        });
+        return;
+      }
+
+      // ── Покраска: авто-расчёт по площади ──
+      if(isSurface && cat.name==="Покраска" && areaSqm>0){
+        const paintQty=calcPaint(areaSqm);
+        items.push({name:"Краска в 2 слоя",qty:paintQty,unit:"л.",price:0,cost:0,auto:true});
+        return;
+      }
+
+      // ── Всё остальное: стандартная логика (фиксированные привязки) ──
+      mats.forEach(om=>{
+        const mat=om.materials;if(!mat)return;
+        let qty=om.quantity||0;
+        if(om.visible){const uq=ts[`_q_${cat.id}_${om.material_id}`];if(uq!==undefined)qty=uq}
+        if(qty<=0)return;
+        items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+      });
+    });
+    res[tab.id]=items;
+  });
+  return res;
+}
+
+// ── Results ──
+function Results({results,orderInfo}){
+  const total=Object.values(results).flat().reduce((s,r)=>s+(r.cost||0),0);
+  return(<div style={{animation:"slideUp .3s"}}>
+    <div style={{textAlign:"center",padding:"20px 0 14px"}}><div style={{fontSize:44}}>📋</div><div style={{fontSize:20,fontWeight:700,marginTop:6}}>Итоговая ведомость</div></div>
+    <div style={{background:"var(--card)",borderRadius:14,padding:14,marginBottom:10,border:"1px solid var(--border)",display:"flex",gap:12,flexWrap:"wrap",fontSize:13,color:"var(--text-muted)"}}>
+      <span>Заказ: {orderInfo.order_number||"—"}</span><span>Адрес: {orderInfo.address||"—"}</span><span>Тел: {orderInfo.phone||"—"}</span>
+    </div>
+    {Object.entries(results).map(([tabId,items])=>{
+      if(!items||items.length===0)return null;
+      const tab=TABS.find(t=>t.id===tabId);
+      const cost=items.reduce((s,i)=>s+(i.cost||0),0);
+      return(<div key={tabId} style={{background:"var(--card)",borderRadius:14,border:"1px solid var(--border)",padding:14,marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,fontSize:13,fontWeight:600,color:"var(--accent)"}}><span>{tab?.icon} {tab?.label}</span>{cost>0&&<span className="cost-tag">{cost.toLocaleString("ru")}₽</span>}</div>
+        {items.map((it,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 10px",borderRadius:8,background:"var(--bg)",marginBottom:3,fontSize:12,color:it.auto?"var(--text-dim)":"var(--text-muted)",fontStyle:it.auto?"italic":"normal",gap:4,flexWrap:"wrap"}}>
+            <span style={{flex:1,minWidth:100}}>{it.auto?"🔒 ":""}{it.name}</span>
+            <span style={{fontFamily:"var(--mono)"}}>{it.qty} {it.unit}</span>
+            {it.price>0&&<span className="price-tag" style={{fontSize:11}}>×{it.price}₽</span>}
+            {it.cost>0&&<span className="cost-tag" style={{fontSize:11}}>={it.cost.toLocaleString("ru")}₽</span>}
+          </div>
+        ))}
+      </div>);
+    })}
+    {total>0&&<div style={{background:"var(--success-soft)",borderRadius:14,border:"1px solid rgba(63,185,80,.3)",padding:18,textAlign:"center",marginTop:16}}>
+      <div style={{fontSize:14,color:"var(--success)",marginBottom:4}}>ИТОГО</div>
+      <div style={{fontSize:28,fontWeight:800,fontFamily:"var(--mono)",color:"var(--success)"}}>{total.toLocaleString("ru")} ₽</div>
+    </div>}
+  </div>);
+}
+
+// ── APP ──
+function App(){
+  const[db,setDb]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[notif,setNotif]=useState({msg:"",type:""});
+  const[showSum,setShowSum]=useState(false);
+  const[sel,setSel]=useState({});
+  const[results,setResults]=useState(null);
+  const[orderInfo,setOI]=useState({order_number:"",address:"",phone:""});
+
+  const notify=useCallback((msg,type="ok")=>setNotif({msg,type}),[]);
+  const refresh=useCallback(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}},[]);
+  useEffect(()=>{(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}setLoading(false)})()},[]);
+
+  const handleCalc=()=>{
+    if(!db)return;
+    setResults(doCalc(sel,db));
+    setShowSum(true);
+    notify("Расчёт выполнен!");
+  };
+  const handleSave=async()=>{
+    if(!results)return;
+    try{
+      const total=Object.values(results).flat().reduce((s,r)=>s+(r.cost||0),0);
+      await sb.from("orders").insert({order_number:orderInfo.order_number,address:orderInfo.address,phone:orderInfo.phone,form_data:sel,results,total_cost:total});
+      notify("Заказ сохранён!");
+    }catch(e){notify(e.message,"error")}
+  };
+
+  const gt=results?Object.values(results).flat().reduce((s,r)=>s+(r.cost||0),0):0;
+
+  return(<div>
+    <Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif({msg:"",type:""})}/>
+
+    {/* HEADER */}
+    <div style={{background:"linear-gradient(135deg,var(--card),var(--bg))",borderBottom:"1px solid var(--border)",padding:16,position:"sticky",top:0,zIndex:100,backdropFilter:"blur(20px)"}}>
+      <div style={{maxWidth:720,margin:"0 auto"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+          <div><div style={{fontSize:11,color:"var(--accent)",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:2}}>К2 Балкон</div><div style={{fontSize:18,fontWeight:700}}>Расчёт материалов</div></div>
+          <div style={{display:"flex",gap:6,flexShrink:0}}>
+            {showSum&&<button onClick={()=>setShowSum(false)} style={{padding:"8px 14px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>← Назад</button>}
+            {!showSum&&<button onClick={handleCalc} style={{padding:"8px 14px",borderRadius:10,background:"var(--success-soft)",color:"var(--success)",border:"1px solid var(--success)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>Итого</button>}
+          </div>
+        </div>
+        {/* Order info */}
+        <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+          {[["order_number","№ заказа"],["address","Адрес"],["phone","Телефон"]].map(([k,p])=>(
+            <input key={k} placeholder={p} value={orderInfo[k]} onChange={e=>setOI({...orderInfo,[k]:e.target.value})}
+              style={{flex:1,minWidth:100,padding:"7px 12px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,color:"var(--text)",fontFamily:"var(--font)",fontSize:13,outline:"none"}}/>
+          ))}
+        </div>
+        {gt>0&&<div style={{marginTop:8,padding:"8px 14px",background:"var(--success-soft)",borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:"var(--success)"}}>Общая стоимость</span>
+          <span style={{fontSize:18,fontWeight:700,fontFamily:"var(--mono)",color:"var(--success)"}}>{gt.toLocaleString("ru")} ₽</span>
+        </div>}
+      </div>
+    </div>
+
+    {/* CONTENT */}
+    <div style={{maxWidth:720,margin:"0 auto",padding:"16px 16px 120px"}}>
+      {loading?<div style={{textAlign:"center",padding:64,color:"var(--text-muted)"}}><div style={{fontSize:32,marginBottom:8}}>⏳</div>Загрузка...</div>
+      :!db?<div style={{textAlign:"center",padding:64,color:"var(--danger)"}}><div style={{fontSize:32,marginBottom:8}}>⚠️</div>Ошибка загрузки данных</div>
+      :showSum&&results?<>
+        <Results results={results} orderInfo={orderInfo}/>
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          <button onClick={handleSave} style={{flex:1,padding:"14px 0",background:"var(--accent)",color:"var(--bg)",border:"none",borderRadius:12,fontFamily:"var(--font)",fontSize:15,fontWeight:600,cursor:"pointer"}}>💾 Сохранить заказ</button>
+          <button onClick={()=>setShowSum(false)} style={{flex:1,padding:"14px 0",background:"transparent",color:"var(--text-muted)",border:"1px solid var(--border)",borderRadius:12,fontFamily:"var(--font)",fontSize:15,fontWeight:600,cursor:"pointer"}}>← К редактированию</button>
+        </div>
+      </>
+      :<>
+        {/* TAB SECTIONS */}
+        {TABS.map(tab=>(
+          <Sec key={tab.id} title={tab.label} icon={tab.icon}>
+            <DynTab tabId={tab.id} db={db} sel={sel} setSel={setSel}/>
+          </Sec>
+        ))}
+
+        {/* СПРАВОЧНИК */}
+        <Sec title="Справочник" icon="📖">
+          <TreeRef db={db} refresh={refresh} notify={notify}/>
+        </Sec>
+      </>}
+    </div>
+
+    {/* Floating calc button */}
+    {!showSum&&db&&<div onClick={handleCalc} style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"var(--accent)",color:"var(--bg)",padding:"12px 24px",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 8px 32px var(--accent-glow)",zIndex:200,animation:"slideUp .4s",display:"flex",alignItems:"center",gap:10,maxWidth:"92vw",fontFamily:"var(--font)"}}>
+      🧮 Рассчитать{gt>0&&<span style={{fontFamily:"var(--mono)",fontWeight:700}}>{gt.toLocaleString("ru")} ₽</span>}
+    </div>}
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
