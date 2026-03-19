@@ -89,6 +89,7 @@ const SURFACE_IDS=["main_wall","facade_wall","bl_wall","bp_wall","ceiling","floo
 const UNITS=["шт.","п.м.","м²","л.","уп.","кг","компл."];
 
 // ── DB ──
+// Калькулятор DB
 async function loadAll(){
   const[mR,cR,oR,omR]=await Promise.all([
     sb.from("materials").select("*").order("name"),
@@ -98,6 +99,121 @@ async function loadAll(){
   ]);
   [mR,cR,oR,omR].forEach(r=>{if(r.error)throw r.error});
   return{materials:mR.data||[],categories:cR.data||[],options:oR.data||[],optionMaterials:omR.data||[]};
+}
+
+// Склад DB (отдельный Supabase-проект)
+const sbSklad=(window.supabase||window.Supabase).createClient(
+  "https://vrqjjpcaisgbxhwvhezo.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZycWpqcGNhaXNnYnhod3ZoZXpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2OTgyMjQsImV4cCI6MjA4OTI3NDIyNH0.U3gMK5cUczd9nIG9s5c7oZZg5OjFuB2AGxxVbMvKmvY"
+);
+async function loadSkladData(){
+  const[iR,mR]=await Promise.all([
+    sbSklad.from("sklad_items").select("*").order("name"),
+    sbSklad.from("sklad_moves").select("*").order("id"),
+  ]);
+  return{items:iR.data||[],moves:mR.data||[]};
+}
+function calcSkladStock(itemId,moves){
+  let t=0;
+  moves.forEach(r=>{
+    if(String(r.item_id||"").trim().toLowerCase()!==String(itemId).trim().toLowerCase())return;
+    const q=parseFloat(r.qty)||0;
+    const tp=String(r.move_type||"").trim();
+    if(tp==="in"||tp==="scrap_return")t+=q;
+    else if(tp==="out"||tp==="reserve"||tp==="scrap")t-=q;
+  });
+  return Math.max(0,Math.round(t*100)/100);
+}
+
+// ── Orders CRUD ──
+async function loadOrders(){
+  const{data,error}=await sb.from("orders").select("*").order("created_at",{ascending:false}).limit(100);
+  if(error)throw error;
+  return data||[];
+}
+async function loadOrderById(id){
+  const{data,error}=await sb.from("orders").select("*").eq("id",id).single();
+  if(error)throw error;
+  return data;
+}
+async function deleteOrder(id){
+  const{error}=await sb.from("orders").delete().eq("id",id);
+  if(error)throw error;
+}
+
+// ── Merge duplicates for PDF ──
+function mergeResults(results){
+  const map={};
+  Object.values(results).flat().forEach(it=>{
+    const key=it.name+"|"+it.unit;
+    if(map[key]){map[key].qty+=it.qty;map[key].cost+=it.cost}
+    else map[key]={...it};
+  });
+  return Object.values(map).sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+// ── PDF generation ──
+function generatePDF(results,orderInfo){
+  const merged=mergeResults(results);
+  const total=merged.reduce((s,r)=>s+(r.cost||0),0);
+  const now=new Date().toLocaleDateString("ru");
+  
+  let html=`<html><head><meta charset="utf-8"><title>Заказ ${orderInfo.order_number||"б/н"}</title>
+  <style>
+    @media print{@page{margin:15mm}}
+    body{font-family:Arial,sans-serif;font-size:12px;color:#333;max-width:800px;margin:0 auto;padding:20px}
+    h1{font-size:18px;margin-bottom:4px}
+    .info{margin:10px 0 16px;font-size:13px;color:#555}
+    .info span{margin-right:20px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th{background:#f5f5f5;font-weight:600;text-align:left;padding:8px 10px;border:1px solid #ddd;font-size:11px}
+    td{padding:7px 10px;border:1px solid #ddd;font-size:12px}
+    tr:nth-child(even){background:#fafafa}
+    .r{text-align:right}
+    .total{font-size:16px;font-weight:700;text-align:right;margin-top:14px;padding:10px;background:#f0f8f0;border-radius:6px}
+    .section{margin-top:20px}
+    .section h3{font-size:14px;margin-bottom:6px;color:#1a73e8;border-bottom:1px solid #e0e0e0;padding-bottom:4px}
+    .footer{margin-top:30px;font-size:10px;color:#999;text-align:center}
+    .auto{color:#888;font-style:italic}
+  </style></head><body>
+  <h1>К2 Балкон — Заказ на монтаж</h1>
+  <div class="info">
+    <span>№ ${orderInfo.order_number||"б/н"}</span>
+    <span>Адрес: ${orderInfo.address||"—"}</span>
+    <span>Тел: ${orderInfo.phone||"—"}</span>
+    <span>Дата: ${now}</span>
+  </div>`;
+
+  // Детальная ведомость по секциям
+  html+=`<h2 style="font-size:15px;margin-top:20px">Детальная ведомость</h2>`;
+  Object.entries(results).forEach(([tabId,items])=>{
+    if(!items||items.length===0)return;
+    const tab=TABS.find(t=>t.id===tabId);
+    html+=`<div class="section"><h3>${tab?.icon||""} ${tab?.label||tabId}</h3><table>
+      <tr><th>Материал</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>`;
+    items.forEach(it=>{
+      html+=`<tr${it.auto?' class="auto"':''}>
+        <td>${it.auto?"🔒 ":""}${it.name}</td><td class="r">${it.qty}</td><td>${it.unit}</td>
+        <td class="r">${it.price?it.price+"₽":"—"}</td><td class="r">${it.cost?it.cost.toLocaleString("ru")+"₽":"—"}</td></tr>`;
+    });
+    html+=`</table></div>`;
+  });
+
+  // Сводная таблица (объединённая)
+  html+=`<h2 style="font-size:15px;margin-top:30px;page-break-before:auto">Сводная ведомость (объединённая)</h2>
+  <table><tr><th>№</th><th>Материал</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена</th><th class="r">Сумма</th></tr>`;
+  merged.forEach((it,i)=>{
+    html+=`<tr><td>${i+1}</td><td>${it.name}</td><td class="r">${Math.round(it.qty*100)/100}</td><td>${it.unit}</td>
+      <td class="r">${it.price?it.price+"₽":"—"}</td><td class="r">${it.cost?Math.round(it.cost).toLocaleString("ru")+"₽":"—"}</td></tr>`;
+  });
+  html+=`</table>`;
+  html+=`<div class="total">ИТОГО: ${total.toLocaleString("ru")} ₽</div>`;
+  html+=`<div class="footer">К2 Балкон — ${now}</div></body></html>`;
+
+  const w=window.open("","_blank");
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>w.print(),500);
 }
 
 // ── UI Components ──
@@ -217,19 +333,10 @@ function TreeRef({db,refresh,notify}){
     if(error)return notify(error.message,"error");
     notify("Удалено");refresh();
   };
-  const addMaterial=async(data)=>{
-    const{error}=await sb.from("materials").insert(data);
-    if(error)return notify(error.message,"error");
-    notify("Материал добавлен");refresh();
-  };
 
   return(<div>
-    {/* Quick add material button */}
-    <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-      <button onClick={()=>setModal({type:"material"})} style={{padding:"8px 16px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>➕ Новый материал</button>
-      <div style={{fontSize:12,color:"var(--text-dim)",display:"flex",alignItems:"center",gap:4}}>
-        📦 {db.materials.length} материалов
-      </div>
+    <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:14,display:"flex",alignItems:"center",gap:4}}>
+      📦 {db.materials.length} материалов в справочнике
     </div>
 
     {/* TREE */}
@@ -309,7 +416,6 @@ function TreeRef({db,refresh,notify}){
     {modal&&modal.type==="category"&&<ModalAddSimple title={`Новая категория в «${modal.tabLabel}»`} placeholder="Название категории" onSave={(name)=>{addCategory(modal.tabId,name);setModal(null)}} onClose={()=>setModal(null)}/>}
     {modal&&modal.type==="option"&&<ModalAddSimple title={`Новый вариант в «${modal.catName}»`} placeholder="Название (ДА, НЕТ, Балкон 3м...)" onSave={(name)=>{addOption(modal.catId,name);setModal(null)}} onClose={()=>setModal(null)}/>}
     {modal&&modal.type==="binding"&&<ModalAddBinding title={`Привязка к «${modal.optionName}»`} materials={db.materials} onSave={(matId,qty,vis)=>{addBinding(modal.optionId,matId,qty,vis);setModal(null)}} onClose={()=>setModal(null)}/>}
-    {modal&&modal.type==="material"&&<ModalAddMaterial onSave={(d)=>{addMaterial(d);setModal(null)}} onClose={()=>setModal(null)}/>}
   </div>);
 }
 
@@ -331,15 +437,34 @@ function ModalAddBinding({title,materials,onSave,onClose}){
   const[matId,setMatId]=useState("");
   const[qty,setQty]=useState(1);
   const[vis,setVis]=useState(false);
+  const[search,setSearch]=useState("");
+  const filtered=materials.filter(m=>m.name.toLowerCase().includes(search.toLowerCase()));
+  const selectedMat=materials.find(m=>String(m.id)===String(matId));
   return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="modal-box">
       <div className="modal-title">{title}</div>
-      <div className="m-field"><div className="m-label">Материал</div>
-        <select className="m-inp" value={matId} onChange={e=>setMatId(e.target.value)}>
-          <option value="">Выберите</option>
-          {materials.map(m=><option key={m.id} value={m.id}>{m.name} — {m.price||0}₽/{m.unit}</option>)}
-        </select>
+      <div className="m-field">
+        <div className="m-label">Поиск материала</div>
+        <input className="m-inp" value={search} onChange={e=>{setSearch(e.target.value);setMatId("")}} placeholder="Начните вводить название..." autoFocus/>
       </div>
+      {/* Список найденных */}
+      <div style={{maxHeight:180,overflowY:"auto",marginBottom:10,border:"1px solid var(--border)",borderRadius:10,background:"var(--bg)"}}>
+        {(search?filtered:materials.slice(0,20)).map(m=>(
+          <div key={m.id} onClick={()=>{setMatId(String(m.id));setSearch(m.name)}}
+            style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+              background:String(m.id)===String(matId)?"var(--accent-soft)":"transparent",
+              display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,transition:"background .1s"}}
+            onMouseEnter={e=>e.currentTarget.style.background="var(--accent-soft)"} onMouseLeave={e=>{if(String(m.id)!==String(matId))e.currentTarget.style.background="transparent"}}>
+            <span style={{fontSize:13,flex:1}}>{m.name}</span>
+            {m.price>0&&<span className="price-tag">{m.price}₽</span>}
+            <span style={{fontSize:10,color:"var(--text-dim)"}}>{m.unit}</span>
+          </div>
+        ))}
+        {search&&filtered.length===0&&<div style={{padding:12,textAlign:"center",color:"var(--text-dim)",fontSize:12}}>Не найдено</div>}
+      </div>
+      {selectedMat&&<div style={{padding:"6px 10px",borderRadius:8,background:"var(--success-soft)",marginBottom:10,fontSize:12,color:"var(--success)"}}>
+        ✓ {selectedMat.name} {selectedMat.price?`— ${selectedMat.price}₽`:""}/{selectedMat.unit}
+      </div>}
       <div className="m-row">
         <div className="m-field" style={{flex:1}}><div className="m-label">Количество</div><input type="number" className="m-inp" value={qty} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step="0.1"/></div>
         <div className="m-field" style={{flex:1}}><div className="m-label">Тип</div>
@@ -355,31 +480,6 @@ function ModalAddBinding({title,materials,onSave,onClose}){
       </div>
       <div style={{display:"flex",gap:8,marginTop:12}}>
         <button className="m-btn" onClick={()=>{if(matId)onSave(Number(matId),qty,vis)}} style={{flex:1}}>Привязать</button>
-        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
-      </div>
-    </div>
-  </div>);
-}
-
-function ModalAddMaterial({onSave,onClose}){
-  const[f,setF]=useState({name:"",color:"",dimensions:"",price:0,stock:0,unit:"шт."});
-  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-    <div className="modal-box">
-      <div className="modal-title">➕ Новый материал</div>
-      <div className="m-field"><div className="m-label">Название</div><input className="m-inp" value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="Вагонка сосна АВ 3м" autoFocus/></div>
-      <div className="m-row">
-        <div className="m-field" style={{flex:1}}><div className="m-label">Цвет</div><input className="m-inp" value={f.color} onChange={e=>setF({...f,color:e.target.value})} placeholder="Натуральный"/></div>
-        <div className="m-field" style={{flex:1}}><div className="m-label">Размеры мм</div><input className="m-inp" value={f.dimensions} onChange={e=>setF({...f,dimensions:e.target.value})} placeholder="3000x96x12"/></div>
-      </div>
-      <div className="m-row">
-        <div className="m-field" style={{flex:1}}><div className="m-label">Цена ₽</div><input type="number" className="m-inp" value={f.price||""} onChange={e=>setF({...f,price:Number(e.target.value)||0})} min="0"/></div>
-        <div className="m-field" style={{flex:1}}><div className="m-label">Остаток</div><input type="number" className="m-inp" value={f.stock||""} onChange={e=>setF({...f,stock:Number(e.target.value)||0})} min="0"/></div>
-        <div className="m-field" style={{flex:1}}><div className="m-label">Единица</div>
-          <select className="m-inp" value={f.unit} onChange={e=>setF({...f,unit:e.target.value})}>{UNITS.map(u=><option key={u}>{u}</option>)}</select>
-        </div>
-      </div>
-      <div style={{display:"flex",gap:8,marginTop:12}}>
-        <button className="m-btn" onClick={()=>{if(f.name.trim())onSave({name:f.name.trim(),color:f.color,dimensions:f.dimensions,price:f.price,stock:f.stock,unit:f.unit})}} style={{flex:1}}>Добавить</button>
         <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
       </div>
     </div>
@@ -670,6 +770,364 @@ function Results({results,orderInfo}){
   </div>);
 }
 
+// ── СКЛАД ──
+function SkladSection({notify,db}){
+  const[items,setItems]=useState([]);
+  const[moves,setMoves]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[search,setSearch]=useState("");
+  const[modal,setModal]=useState(null);
+  const[tab,setTab]=useState("stock");
+
+  const load=useCallback(async()=>{
+    try{
+      const[iR,mR]=await Promise.all([
+        sb.from("sklad_items").select("*").order("name"),
+        sb.from("sklad_moves").select("*").order("id",{ascending:false})
+      ]);
+      if(iR.error)throw iR.error;
+      if(mR.error)throw mR.error;
+      setItems(iR.data||[]);
+      setMoves(mR.data||[]);
+    }catch(e){notify(e.message,"error")}
+    setLoading(false);
+  },[]);
+  useEffect(()=>{load()},[]);
+
+  const getStock=(itemId)=>{
+    let total=0;
+    moves.forEach(r=>{
+      if(String(r.item_id).toLowerCase()!==String(itemId).toLowerCase())return;
+      const q=parseFloat(r.qty)||0;
+      const t=(r.move_type||"").trim();
+      if(t==="in"||t==="scrap_return")total+=q;
+      else if(t==="out"||t==="reserve"||t==="scrap")total-=q;
+    });
+    return Math.max(0,Math.round(total*100)/100);
+  };
+
+  // Find sklad item by material name
+  const findSkladItem=(matName)=>items.find(i=>i.name.toLowerCase()===matName?.toLowerCase());
+
+  const saveItem=async(data,editId)=>{
+    try{
+      const clean={item_id:data.item_id,name:data.name,type:data.type,unit:data.unit,min_stock:data.min_stock,buy_price:data.buy_price};
+      if(editId){
+        await sb.from("sklad_items").update(clean).eq("id",editId);
+      }else{
+        const{error}=await sb.from("sklad_items").insert(clean);
+        if(error)throw error;
+        if(data._initStock>0){
+          await sb.from("sklad_moves").insert({move_date:new Date().toISOString().split("T")[0],move_type:"in",item_id:data.item_id,qty:data._initStock,unit:data.unit,price:data.buy_price,comment:"Начальный остаток"});
+        }
+      }
+      notify(editId?"Обновлено":"Позиция добавлена");
+      setModal(null);load();
+    }catch(e){notify(e.message,"error")}
+  };
+
+  const addMove=async(moveData)=>{
+    try{
+      const{error}=await sb.from("sklad_moves").insert(moveData);
+      if(error)throw error;
+      notify(moveData.move_type==="in"?"Приход":"Расход");
+      setModal(null);load();
+    }catch(e){notify(e.message,"error")}
+  };
+
+  const delItem=async(id,name)=>{
+    if(!confirm(`Удалить «${name}»?`))return;
+    try{
+      const item=items.find(i=>i.id===id);
+      if(item)await sb.from("sklad_moves").delete().eq("item_id",item.item_id);
+      await sb.from("sklad_items").delete().eq("id",id);
+      notify("Удалено");load();
+    }catch(e){notify(e.message,"error")}
+  };
+
+  // Update material price/color/dims in materials table
+  const updateMat=async(matId,updates)=>{
+    try{
+      const{error}=await sb.from("materials").update(updates).eq("id",matId);
+      if(error)throw error;
+      notify("Материал обновлён");
+      // Refresh both: parent db (справочник) and local sklad
+      if(window._refreshDb) await window._refreshDb();
+      await load();
+      setModal(null);
+    }catch(e){notify(e.message,"error")}
+  };
+
+  // Add material to sklad (make it складской)
+  const addToSklad=async(mat,initStock)=>{
+    try{
+      const{error}=await sb.from("sklad_items").insert({item_id:mat.name,name:mat.name,type:mat.color||"",unit:mat.unit||"шт.",min_stock:0,buy_price:mat.price||0});
+      if(error)throw error;
+      if(initStock>0){
+        await sb.from("sklad_moves").insert({move_date:new Date().toISOString().split("T")[0],move_type:"in",item_id:mat.name,qty:initStock,unit:mat.unit||"шт.",price:mat.price||0,comment:"Начальный остаток"});
+      }
+      notify("Добавлено на склад");
+      setModal(null);load();
+    }catch(e){notify(e.message,"error")}
+  };
+
+  // Remove from sklad (make it заказной again)
+  const removeFromSklad=async(skladItem)=>{
+    if(!confirm(`Убрать «${skladItem.name}» со склада? Все движения будут удалены.`))return;
+    try{
+      await sb.from("sklad_moves").delete().eq("item_id",skladItem.item_id);
+      await sb.from("sklad_items").delete().eq("id",skladItem.id);
+      notify("Убрано со склада");
+      setModal(null);load();
+    }catch(e){notify(e.message,"error")}
+  };
+
+  // Items with stock > 0
+  const inStock=items.filter(i=>getStock(i.item_id)>0);
+  const filteredStock=inStock.filter(i=>i.name.toLowerCase().includes(search.toLowerCase()));
+
+  // All materials from справочник
+  const allMats=db?.materials||[];
+  const filteredMats=allMats.filter(m=>m.name.toLowerCase().includes(search.toLowerCase()));
+
+  if(loading)return <div style={{textAlign:"center",padding:32,color:"var(--text-muted)"}}>⏳ Загрузка склада...</div>;
+
+  return(<div>
+    {/* Tabs */}
+    <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+      <Ch label={`🏪 В наличии (${inStock.length})`} active={tab==="stock"} onClick={()=>{setTab("stock");setSearch("")}}/>
+      <Ch label={`📋 База (${allMats.length})`} active={tab==="base"} onClick={()=>{setTab("base");setSearch("")}}/>
+      <Ch label="📓 Журнал" active={tab==="log"} onClick={()=>{setTab("log");setSearch("")}}/>
+    </div>
+    {/* Actions */}
+    <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+      {tab==="stock"&&<>
+        <button onClick={()=>setModal({type:"item"})} style={{padding:"6px 12px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer"}}>＋ Позиция на склад</button>
+        <button onClick={()=>setModal({type:"move"})} style={{padding:"6px 12px",borderRadius:10,background:"var(--success-soft)",color:"var(--success)",border:"1px solid var(--success)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer"}}>↕ Движение</button>
+      </>}
+    </div>
+
+    {/* Search */}
+    {tab!=="log"&&<input placeholder="🔍 Поиск..." value={search} onChange={e=>setSearch(e.target.value)}
+      style={{width:"100%",padding:"9px 12px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,color:"var(--text)",fontFamily:"var(--font)",fontSize:13,outline:"none",marginBottom:10}}/>}
+
+    {/* ═══ TAB 1: В наличии ═══ */}
+    {tab==="stock"&&<div>
+      {filteredStock.length===0&&<div style={{textAlign:"center",color:"var(--text-dim)",padding:24,fontSize:13}}>
+        {search?"Ничего не найдено":"Склад пуст. Добавьте позиции и оформите приход."}
+      </div>}
+      {filteredStock.map(item=>{
+        const stock=getStock(item.item_id);
+        const isLow=item.min_stock>0&&stock<=item.min_stock;
+        return(<div key={item.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:"var(--bg)",borderRadius:12,marginBottom:4,border:`1px solid ${isLow?"var(--danger)":"var(--border)"}`,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:120}}>
+            <div style={{fontSize:13,fontWeight:600}}>{item.name}</div>
+            <div style={{fontSize:11,color:"var(--text-dim)"}}>{item.type||item.unit}{item.min_stock>0?` • мин: ${item.min_stock}`:""}</div>
+          </div>
+          <div style={{textAlign:"right",minWidth:50}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:700,color:isLow?"var(--danger)":stock>0?"var(--success)":"var(--text-dim)"}}>{stock}</div>
+            <div style={{fontSize:10,color:"var(--text-dim)"}}>{item.unit}</div>
+          </div>
+          {item.buy_price>0&&<span className="price-tag">{item.buy_price}₽</span>}
+          <div style={{display:"flex",gap:2}}>
+            <button className="tree-btn" title="Приход" onClick={()=>setModal({type:"move",prefill:{item_id:item.item_id,move_type:"in",unit:item.unit,price:item.buy_price}})}>📥</button>
+            <button className="tree-btn" title="Расход" onClick={()=>setModal({type:"move",prefill:{item_id:item.item_id,move_type:"out",unit:item.unit,price:item.buy_price}})}>📤</button>
+            <button className="tree-btn" title="Редактировать" onClick={()=>setModal({type:"item",edit:item})}>✏️</button>
+            <button className="tree-btn del" title="Удалить" onClick={()=>delItem(item.id,item.name)}>✕</button>
+          </div>
+        </div>);
+      })}
+    </div>}
+
+    {/* ═══ TAB 2: База материалов ═══ */}
+    {tab==="base"&&<div>
+      <div style={{fontSize:11,color:"var(--text-dim)",marginBottom:8,padding:"0 4px"}}>
+        🏪 = на складе &nbsp; 🛒 = заказной &nbsp; Нажмите на позицию для редактирования
+      </div>
+      {filteredMats.length===0&&<div style={{textAlign:"center",color:"var(--text-dim)",padding:24}}>Нет материалов</div>}
+      {filteredMats.map(mat=>{
+        const si=findSkladItem(mat.name);
+        const stock=si?getStock(si.item_id):0;
+        const onSklad=!!si;
+        return(<div key={mat.id} onClick={()=>setModal({type:"matEdit",mat,skladItem:si})}
+          style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:"var(--bg)",borderRadius:10,marginBottom:3,flexWrap:"wrap",cursor:"pointer",transition:"background .15s",border:"1px solid var(--border)"}}
+          onMouseEnter={e=>e.currentTarget.style.borderColor="var(--accent)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
+          <span style={{fontSize:14,width:20,textAlign:"center"}}>{onSklad?"🏪":"🛒"}</span>
+          <div style={{flex:1,minWidth:120}}>
+            <div style={{fontSize:13,fontWeight:600}}>{mat.name}</div>
+            <div style={{fontSize:10,color:"var(--text-dim)"}}>
+              {mat.color&&mat.color+" • "}{mat.dimensions||""}{mat.unit?" • "+mat.unit:""}
+            </div>
+          </div>
+          {onSklad&&<div style={{textAlign:"right"}}>
+            <div style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,color:stock>0?"var(--success)":"var(--text-dim)"}}>{stock}</div>
+            <div style={{fontSize:9,color:"var(--text-dim)"}}>{si.unit}</div>
+          </div>}
+          {mat.price>0&&<span className="price-tag">{mat.price}₽</span>}
+          {!onSklad&&<span style={{fontSize:10,color:"var(--warning)",padding:"2px 6px",borderRadius:8,background:"var(--warning-soft)"}}>заказной</span>}
+        </div>);
+      })}
+    </div>}
+
+    {/* ═══ TAB 3: Журнал ═══ */}
+    {tab==="log"&&<div>
+      {moves.length===0&&<div style={{textAlign:"center",color:"var(--text-dim)",padding:24}}>Нет движений</div>}
+      {moves.slice(0,80).map(mv=>{
+        const isIn=mv.move_type==="in"||mv.move_type==="scrap_return";
+        const typeLabel={in:"Приход",out:"Расход",reserve:"Резерв",scrap:"Списание",scrap_return:"Возврат"}[mv.move_type]||mv.move_type;
+        const itemName=items.find(i=>i.item_id===mv.item_id)?.name||mv.item_id;
+        return(<div key={mv.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"var(--bg)",borderRadius:10,marginBottom:3,fontSize:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:"var(--mono)",color:"var(--text-dim)",minWidth:70,fontSize:11}}>{mv.move_date||""}</span>
+          <span style={{padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:600,background:isIn?"var(--success-soft)":"var(--danger-soft)",color:isIn?"var(--success)":"var(--danger)"}}>{typeLabel}</span>
+          <span style={{flex:1,minWidth:80,color:"var(--text-muted)"}}>{itemName}</span>
+          <span style={{fontFamily:"var(--mono)",fontWeight:600,color:isIn?"var(--success)":"var(--danger)"}}>{isIn?"+":"−"}{mv.qty} {mv.unit}</span>
+          {mv.order_num&&<span style={{fontSize:10,color:"var(--accent)"}}>📋{mv.order_num}</span>}
+          {mv.comment&&<span style={{fontSize:10,color:"var(--text-dim)",width:"100%",paddingLeft:78}}>{mv.comment}</span>}
+        </div>);
+      })}
+    </div>}
+
+    {/* Modals */}
+    {modal&&modal.type==="item"&&<SkladItemModal item={modal.edit} prefillName={modal.prefillName} prefillUnit={modal.prefillUnit} prefillPrice={modal.prefillPrice} onSave={saveItem} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="move"&&<SkladMoveModal items={items} prefill={modal.prefill} onSave={addMove} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="matEdit"&&<MatEditModal mat={modal.mat} skladItem={modal.skladItem} getStock={getStock} onUpdateMat={updateMat} onAddToSklad={addToSklad} onRemoveFromSklad={removeFromSklad} onClose={()=>setModal(null)}/>}
+  </div>);
+}
+
+function SkladItemModal({item,prefillName,prefillUnit,prefillPrice,onSave,onClose}){
+  const[f,setF]=useState({
+    item_id:item?.item_id||prefillName||"",name:item?.name||prefillName||"",type:item?.type||"",
+    unit:item?.unit||prefillUnit||"шт.",min_stock:item?.min_stock||0,buy_price:item?.buy_price||prefillPrice||0,_initStock:0
+  });
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div className="modal-title">{item?"✏️ Редактирование":"🏪 Добавить на склад"}</div>
+      <div className="m-field"><div className="m-label">Название</div><input className="m-inp" value={f.name} onChange={e=>setF({...f,name:e.target.value,item_id:item?f.item_id:e.target.value})} autoFocus/></div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Тип/описание</div><input className="m-inp" value={f.type} onChange={e=>setF({...f,type:e.target.value})} placeholder="лист, рулон..."/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Единица</div>
+          <select className="m-inp" value={f.unit} onChange={e=>setF({...f,unit:e.target.value})}>
+            {UNITS.map(u=><option key={u}>{u}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Закуп. цена ₽</div><input type="number" className="m-inp" value={f.buy_price||""} onChange={e=>setF({...f,buy_price:Number(e.target.value)||0})} min="0"/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Мин. остаток</div><input type="number" className="m-inp" value={f.min_stock||""} onChange={e=>setF({...f,min_stock:Number(e.target.value)||0})} min="0"/></div>
+      </div>
+      {!item&&<div className="m-field"><div className="m-label">Начальный остаток</div><input type="number" className="m-inp" value={f._initStock||""} onChange={e=>setF({...f,_initStock:Number(e.target.value)||0})} min="0" placeholder="Сколько сейчас на складе"/></div>}
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button className="m-btn" onClick={()=>{if(!f.name.trim())return;onSave({item_id:f.item_id||f.name,name:f.name.trim(),type:f.type,unit:f.unit,min_stock:f.min_stock,buy_price:f.buy_price,_initStock:f._initStock},item?.id)}} style={{flex:1}}>{item?"Сохранить":"Добавить"}</button>
+        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+      </div>
+    </div>
+  </div>);
+}
+
+function SkladMoveModal({items,prefill,onSave,onClose}){
+  const pf=prefill||{};
+  const[f,setF]=useState({item_id:pf.item_id||"",move_type:pf.move_type||"in",qty:0,unit:pf.unit||"шт.",price:pf.price||0,comment:"",move_date:new Date().toISOString().split("T")[0]});
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div className="modal-title">{f.move_type==="in"?"📥 Приход":"📤 Расход"}</div>
+      <div className="m-field"><div className="m-label">Позиция</div>
+        <select className="m-inp" value={f.item_id} onChange={e=>{const it=items.find(i=>i.item_id===e.target.value);setF({...f,item_id:e.target.value,unit:it?.unit||"шт.",price:it?.buy_price||0})}}>
+          <option value="">Выберите</option>
+          {items.map(i=><option key={i.id} value={i.item_id}>{i.name}</option>)}
+        </select>
+      </div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Тип</div>
+          <select className="m-inp" value={f.move_type} onChange={e=>setF({...f,move_type:e.target.value})}>
+            <option value="in">📥 Приход</option>
+            <option value="out">📤 Расход</option>
+            <option value="scrap">🗑 Списание</option>
+          </select>
+        </div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Кол-во</div><input type="number" className="m-inp" value={f.qty||""} onChange={e=>setF({...f,qty:Number(e.target.value)||0})} min="0" autoFocus/></div>
+      </div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Цена ₽</div><input type="number" className="m-inp" value={f.price||""} onChange={e=>setF({...f,price:Number(e.target.value)||0})} min="0"/></div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Дата</div><input type="date" className="m-inp" value={f.move_date} onChange={e=>setF({...f,move_date:e.target.value})}/></div>
+      </div>
+      <div className="m-field"><div className="m-label">Комментарий</div><input className="m-inp" value={f.comment} onChange={e=>setF({...f,comment:e.target.value})} placeholder="Необязательно"/></div>
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button className="m-btn" onClick={()=>{if(!f.item_id||f.qty<=0)return;onSave({move_date:f.move_date,move_type:f.move_type,item_id:f.item_id,qty:f.qty,unit:f.unit,price:f.price,comment:f.comment})}} style={{flex:1}}>Провести</button>
+        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+      </div>
+    </div>
+  </div>);
+}
+
+function MatEditModal({mat,skladItem,getStock,onUpdateMat,onAddToSklad,onRemoveFromSklad,onClose}){
+  const[price,setPrice]=useState(mat.price||0);
+  const[color,setColor]=useState(mat.color||"");
+  const[dims,setDims]=useState(mat.dimensions||"");
+  const[unit,setUnit]=useState(mat.unit||"шт.");
+  const[initStock,setInitStock]=useState(0);
+  const onSklad=!!skladItem;
+  const stock=onSklad?getStock(skladItem.item_id):0;
+
+  const handleSave=()=>{
+    onUpdateMat(mat.id,{price:price,color:color,dimensions:dims,unit:unit});
+  };
+
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+        <div>
+          <div className="modal-title" style={{marginBottom:4}}>{mat.name}</div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <span style={{fontSize:12,padding:"2px 8px",borderRadius:10,fontWeight:600,
+              background:onSklad?"var(--success-soft)":"var(--warning-soft)",
+              color:onSklad?"var(--success)":"var(--warning)"}}>
+              {onSklad?"🏪 На складе":"🛒 Заказной"}
+            </span>
+            {onSklad&&<span style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,color:stock>0?"var(--success)":"var(--text-dim)"}}>остаток: {stock}</span>}
+          </div>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text-muted)",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+      </div>
+
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Цена ₽</div>
+          <input type="number" className="m-inp" value={price||""} onChange={e=>setPrice(Number(e.target.value)||0)} min="0" step="0.01"/>
+        </div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Единица</div>
+          <select className="m-inp" value={unit} onChange={e=>setUnit(e.target.value)}>
+            {UNITS.map(u=><option key={u}>{u}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Цвет / описание</div>
+          <input className="m-inp" value={color} onChange={e=>setColor(e.target.value)} placeholder="Натуральный"/>
+        </div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">Размеры (мм)</div>
+          <input className="m-inp" value={dims} onChange={e=>setDims(e.target.value)} placeholder="3000x96x12"/>
+        </div>
+      </div>
+
+      <button className="m-btn" onClick={handleSave} style={{marginTop:8}}>💾 Сохранить изменения</button>
+
+      {/* Переключение складской/заказной */}
+      <div style={{borderTop:"1px solid var(--border)",marginTop:16,paddingTop:12}}>
+        {!onSklad?<div>
+          <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:8}}>Сделать складской позицией — материал будет списываться со склада при подтверждении заказа</div>
+          <div className="m-field"><div className="m-label">Начальный остаток</div>
+            <input type="number" className="m-inp" value={initStock||""} onChange={e=>setInitStock(Number(e.target.value)||0)} min="0" placeholder="Сколько сейчас есть"/>
+          </div>
+          <button className="m-btn" onClick={()=>onAddToSklad(mat,initStock)} style={{background:"var(--success)",marginTop:4}}>🏪 Завести на склад</button>
+        </div>
+        :<div>
+          <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:8}}>Позиция на складе. Можно сделать заказной — тогда она не будет списываться автоматически</div>
+          <button className="m-btn" onClick={()=>onRemoveFromSklad(skladItem)} style={{background:"var(--danger)",marginTop:4}}>🛒 Сделать заказным</button>
+        </div>}
+      </div>
+    </div>
+  </div>);
+}
+
 // ── APP ──
 function App(){
   const[db,setDb]=useState(null);
@@ -682,6 +1140,7 @@ function App(){
 
   const notify=useCallback((msg,type="ok")=>setNotif({msg,type}),[]);
   const refresh=useCallback(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}},[]);
+  useEffect(()=>{window._refreshDb=refresh},[refresh]);
   useEffect(()=>{(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}setLoading(false)})()},[]);
 
   const handleCalc=()=>{
@@ -750,6 +1209,11 @@ function App(){
         {/* СПРАВОЧНИК */}
         <Sec title="Справочник" icon="📖">
           <TreeRef db={db} refresh={refresh} notify={notify}/>
+        </Sec>
+
+        {/* СКЛАД */}
+        <Sec title="Склад" icon="📦">
+          <SkladSection notify={notify} db={db}/>
         </Sec>
       </>}
     </div>
