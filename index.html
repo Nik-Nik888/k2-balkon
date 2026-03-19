@@ -865,15 +865,81 @@ function doCalc(sel,db){
   return res;
 }
 
-// ── Results ──
-function Results({results,orderInfo}){
+// ── Merge duplicate items ──
+function mergeItems(results){
+  const merged={};
+  Object.entries(results).forEach(([tabId,items])=>{
+    if(!items)return;
+    items.forEach(it=>{
+      const key=it.name+"||"+it.unit;
+      if(merged[key]){merged[key].qty+=it.qty;merged[key].cost+=it.cost}
+      else{merged[key]={...it}}
+    });
+  });
+  return Object.values(merged).sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+// ── PDF Export ──
+function exportPDF(results,orderInfo){
+  const merged=mergeItems(results);
+  const total=merged.reduce((s,r)=>s+(r.cost||0),0);
+  const date=new Date().toLocaleDateString("ru");
+
+  let html=`<html><head><meta charset="utf-8"><title>Заказ ${orderInfo.order_number||""}</title>
+  <style>
+    body{font-family:Arial,sans-serif;padding:20px;color:#333;font-size:12px}
+    h1{font-size:18px;margin-bottom:4px}
+    .info{margin-bottom:16px;color:#666}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th{background:#f5f5f5;text-align:left;padding:6px 8px;border:1px solid #ddd;font-size:11px}
+    td{padding:6px 8px;border:1px solid #ddd}
+    .r{text-align:right;font-family:monospace}
+    .total{margin-top:16px;text-align:right;font-size:16px;font-weight:bold}
+    @media print{body{padding:10px}button{display:none!important}}
+  </style></head><body>
+  <h1>К2 Балкон — Заказ на монтаж</h1>
+  <div class="info">
+    <b>Заказ:</b> ${orderInfo.order_number||"—"} &nbsp;
+    <b>Адрес:</b> ${orderInfo.address||"—"} &nbsp;
+    <b>Тел:</b> ${orderInfo.phone||"—"} &nbsp;
+    <b>Дата:</b> ${date}
+  </div>
+  <table>
+    <thead><tr><th>№</th><th>Наименование</th><th>Кол-во</th><th>Ед.</th><th>Цена</th><th>Сумма</th></tr></thead>
+    <tbody>`;
+  merged.forEach((it,i)=>{
+    html+=`<tr><td>${i+1}</td><td>${it.name}${it.auto?" (авто)":""}</td><td class="r">${it.qty}</td><td>${it.unit}</td><td class="r">${it.price?it.price+"₽":"—"}</td><td class="r">${it.cost?it.cost.toLocaleString("ru")+"₽":"—"}</td></tr>`;
+  });
+  html+=`</tbody></table>
+  <div class="total">ИТОГО: ${total.toLocaleString("ru")} ₽</div>
+  <br><button onclick="window.print()" style="padding:10px 24px;font-size:14px;cursor:pointer">🖨 Печать</button>
+  </body></html>`;
+
+  const w=window.open("","_blank");
+  w.document.write(html);
+  w.document.close();
+}
+
+// ── Results (with merged view + per-section view) ──
+function Results({results,orderInfo,onExportPDF}){
+  const[view,setView]=useState("sections"); // sections | merged
   const total=Object.values(results).flat().reduce((s,r)=>s+(r.cost||0),0);
+  const merged=mergeItems(results);
+
   return(<div style={{animation:"slideUp .3s"}}>
     <div style={{textAlign:"center",padding:"20px 0 14px"}}><div style={{fontSize:44}}>📋</div><div style={{fontSize:20,fontWeight:700,marginTop:6}}>Итоговая ведомость</div></div>
     <div style={{background:"var(--card)",borderRadius:14,padding:14,marginBottom:10,border:"1px solid var(--border)",display:"flex",gap:12,flexWrap:"wrap",fontSize:13,color:"var(--text-muted)"}}>
       <span>Заказ: {orderInfo.order_number||"—"}</span><span>Адрес: {orderInfo.address||"—"}</span><span>Тел: {orderInfo.phone||"—"}</span>
     </div>
-    {Object.entries(results).map(([tabId,items])=>{
+
+    {/* View toggle */}
+    <div style={{display:"flex",gap:6,marginBottom:10}}>
+      <Ch label="По секциям" active={view==="sections"} onClick={()=>setView("sections")}/>
+      <Ch label="Сводная (объединённая)" active={view==="merged"} onClick={()=>setView("merged")}/>
+    </div>
+
+    {/* Per-section view */}
+    {view==="sections"&&Object.entries(results).map(([tabId,items])=>{
       if(!items||items.length===0)return null;
       const tab=TABS.find(t=>t.id===tabId);
       const cost=items.reduce((s,i)=>s+(i.cost||0),0);
@@ -889,10 +955,112 @@ function Results({results,orderInfo}){
         ))}
       </div>);
     })}
+
+    {/* Merged view */}
+    {view==="merged"&&<div style={{background:"var(--card)",borderRadius:14,border:"1px solid var(--border)",padding:14}}>
+      <div style={{fontSize:13,fontWeight:600,color:"var(--accent)",marginBottom:8}}>📦 Сводный список ({merged.length} позиций)</div>
+      {merged.map((it,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 10px",borderRadius:8,background:"var(--bg)",marginBottom:3,fontSize:12,color:"var(--text-muted)",gap:4,flexWrap:"wrap"}}>
+          <span style={{minWidth:20,color:"var(--text-dim)",fontFamily:"var(--mono)"}}>{i+1}.</span>
+          <span style={{flex:1,minWidth:100}}>{it.name}</span>
+          <span style={{fontFamily:"var(--mono)",fontWeight:600}}>{it.qty} {it.unit}</span>
+          {it.price>0&&<span className="price-tag" style={{fontSize:11}}>×{it.price}₽</span>}
+          {it.cost>0&&<span className="cost-tag" style={{fontSize:11}}>={it.cost.toLocaleString("ru")}₽</span>}
+        </div>
+      ))}
+    </div>}
+
     {total>0&&<div style={{background:"var(--success-soft)",borderRadius:14,border:"1px solid rgba(63,185,80,.3)",padding:18,textAlign:"center",marginTop:16}}>
       <div style={{fontSize:14,color:"var(--success)",marginBottom:4}}>ИТОГО</div>
       <div style={{fontSize:28,fontWeight:800,fontFamily:"var(--mono)",color:"var(--success)"}}>{total.toLocaleString("ru")} ₽</div>
     </div>}
+
+    {/* Export button */}
+    <button onClick={onExportPDF} style={{width:"100%",marginTop:12,padding:"12px 0",background:"var(--orange-soft)",color:"var(--orange)",border:"1px solid var(--orange)",borderRadius:12,fontFamily:"var(--font)",fontSize:14,fontWeight:600,cursor:"pointer"}}>
+      📄 Сохранить / Печать PDF
+    </button>
+  </div>);
+}
+
+// ── Orders Section ──
+function OrdersSection({notify}){
+  const[orders,setOrders]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[selected,setSelected]=useState(null);
+
+  const load=async()=>{
+    try{
+      const{data,error}=await sb.from("orders").select("*").order("created_at",{ascending:false}).limit(50);
+      if(error)throw error;
+      setOrders(data||[]);
+    }catch(e){notify(e.message,"error")}
+    setLoading(false);
+  };
+  useEffect(()=>{load()},[]);
+
+  const delOrder=async(id)=>{
+    if(!confirm("Удалить заказ?"))return;
+    try{
+      await sb.from("orders").delete().eq("id",id);
+      notify("Заказ удалён");
+      setSelected(null);load();
+    }catch(e){notify(e.message,"error")}
+  };
+
+  const viewPDF=(order)=>{
+    if(order.results){exportPDF(order.results,{order_number:order.order_number,address:order.address,phone:order.phone})}
+  };
+
+  if(loading)return<div style={{textAlign:"center",padding:32,color:"var(--text-muted)"}}>⏳</div>;
+
+  // Detail view
+  if(selected){
+    const o=selected;
+    const res=o.results||{};
+    const merged=mergeItems(res);
+    const total=merged.reduce((s,r)=>s+(r.cost||0),0);
+    return(<div>
+      <button onClick={()=>setSelected(null)} style={{padding:"6px 14px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer",marginBottom:12}}>← К списку</button>
+      <div style={{background:"var(--bg)",borderRadius:14,border:"1px solid var(--border)",padding:16,marginBottom:10}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:8}}>Заказ: {o.order_number||"—"}</div>
+        <div style={{fontSize:13,color:"var(--text-muted)",marginBottom:4}}>Адрес: {o.address||"—"}</div>
+        <div style={{fontSize:13,color:"var(--text-muted)",marginBottom:4}}>Тел: {o.phone||"—"}</div>
+        <div style={{fontSize:12,color:"var(--text-dim)"}}>Создан: {new Date(o.created_at).toLocaleString("ru")}</div>
+        {total>0&&<div style={{marginTop:8,fontFamily:"var(--mono)",fontSize:18,fontWeight:700,color:"var(--success)"}}>{total.toLocaleString("ru")} ₽</div>}
+      </div>
+      <div style={{fontSize:13,fontWeight:600,color:"var(--accent)",marginBottom:8}}>📦 Материалы ({merged.length})</div>
+      {merged.map((it,i)=>(
+        <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 10px",borderRadius:8,background:"var(--bg)",marginBottom:3,fontSize:12,color:"var(--text-muted)",gap:4,flexWrap:"wrap",border:"1px solid var(--border)"}}>
+          <span style={{minWidth:20,color:"var(--text-dim)",fontFamily:"var(--mono)"}}>{i+1}.</span>
+          <span style={{flex:1}}>{it.name}</span>
+          <span style={{fontFamily:"var(--mono)",fontWeight:600}}>{it.qty} {it.unit}</span>
+          {it.cost>0&&<span className="cost-tag">{it.cost.toLocaleString("ru")}₽</span>}
+        </div>
+      ))}
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button onClick={()=>viewPDF(o)} style={{flex:1,padding:"10px 0",background:"var(--orange-soft)",color:"var(--orange)",border:"1px solid var(--orange)",borderRadius:10,fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 PDF</button>
+        <button onClick={()=>delOrder(o.id)} style={{flex:1,padding:"10px 0",background:"var(--danger-soft)",color:"var(--danger)",border:"1px solid var(--danger)",borderRadius:10,fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>🗑 Удалить</button>
+      </div>
+    </div>);
+  }
+
+  // List view
+  return(<div>
+    {orders.length===0&&<div style={{textAlign:"center",color:"var(--text-dim)",padding:24}}>Нет сохранённых заказов</div>}
+    {orders.map(o=>{
+      const total=o.total_cost||0;
+      return(<div key={o.id} onClick={()=>setSelected(o)}
+        style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:"var(--bg)",borderRadius:12,marginBottom:4,border:"1px solid var(--border)",cursor:"pointer",transition:"border-color .15s"}}
+        onMouseEnter={e=>e.currentTarget.style.borderColor="var(--accent)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600}}>{o.order_number||"Без номера"}</div>
+          <div style={{fontSize:12,color:"var(--text-muted)"}}>{o.address||"—"}</div>
+          <div style={{fontSize:10,color:"var(--text-dim)"}}>{new Date(o.created_at).toLocaleDateString("ru")}</div>
+        </div>
+        {total>0&&<div style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,color:"var(--success)"}}>{total.toLocaleString("ru")}₽</div>}
+        <span style={{color:"var(--text-dim)",fontSize:14}}>›</span>
+      </div>);
+    })}
   </div>);
 }
 
@@ -1318,7 +1486,7 @@ function App(){
       {loading?<div style={{textAlign:"center",padding:64,color:"var(--text-muted)"}}><div style={{fontSize:32,marginBottom:8}}>⏳</div>Загрузка...</div>
       :!db?<div style={{textAlign:"center",padding:64,color:"var(--danger)"}}><div style={{fontSize:32,marginBottom:8}}>⚠️</div>Ошибка загрузки данных</div>
       :showSum&&results?<>
-        <Results results={results} orderInfo={orderInfo}/>
+        <Results results={results} orderInfo={orderInfo} onExportPDF={()=>exportPDF(results,orderInfo)}/>
         <div style={{display:"flex",gap:8,marginTop:16}}>
           <button onClick={handleSave} style={{flex:1,padding:"14px 0",background:"var(--accent)",color:"var(--bg)",border:"none",borderRadius:12,fontFamily:"var(--font)",fontSize:15,fontWeight:600,cursor:"pointer"}}>💾 Сохранить заказ</button>
           <button onClick={()=>setShowSum(false)} style={{flex:1,padding:"14px 0",background:"transparent",color:"var(--text-muted)",border:"1px solid var(--border)",borderRadius:12,fontFamily:"var(--font)",fontSize:15,fontWeight:600,cursor:"pointer"}}>← К редактированию</button>
@@ -1331,6 +1499,11 @@ function App(){
             <DynTab tabId={tab.id} db={db} sel={sel} setSel={setSel}/>
           </Sec>
         ))}
+
+        {/* ЗАКАЗЫ */}
+        <Sec title="Заказы" icon="📋">
+          <OrdersSection notify={notify}/>
+        </Sec>
 
         {/* СПРАВОЧНИК */}
         <Sec title="Справочник" icon="📖">
