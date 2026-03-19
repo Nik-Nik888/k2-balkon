@@ -89,16 +89,20 @@ const SURFACE_IDS=["main_wall","facade_wall","bl_wall","bp_wall","ceiling","floo
 const UNITS=["шт.","п.м.","м²","л.","уп.","кг","компл."];
 
 // ── DB ──
-// Калькулятор DB
 async function loadAll(){
-  const[mR,cR,oR,omR]=await Promise.all([
+  const[mR,cR,oR,omR,ftR,ftiR]=await Promise.all([
     sb.from("materials").select("*").order("name"),
     sb.from("categories").select("*").order("sort_order"),
     sb.from("category_options").select("*").order("sort_order"),
     sb.from("option_materials").select("*,materials(*)"),
+    sb.from("finish_types").select("*").order("sort_order"),
+    sb.from("finish_template_items").select("*").order("sort_order"),
   ]);
   [mR,cR,oR,omR].forEach(r=>{if(r.error)throw r.error});
-  return{materials:mR.data||[],categories:cR.data||[],options:oR.data||[],optionMaterials:omR.data||[]};
+  return{
+    materials:mR.data||[],categories:cR.data||[],options:oR.data||[],optionMaterials:omR.data||[],
+    finishTypes:ftR.data||[],finishTemplateItems:ftiR.data||[]
+  };
 }
 
 // Склад DB (отдельный Supabase-проект)
@@ -419,6 +423,117 @@ function TreeRef({db,refresh,notify}){
   </div>);
 }
 
+// ── Templates Section ──
+function TemplatesSection({db,refresh,notify}){
+  const types=db.finishTypes||[];
+  const items=db.finishTemplateItems||[];
+  const[expanded,setExpanded]=useState({});
+  const[modal,setModal]=useState(null);
+  const tog=(k)=>setExpanded(p=>({...p,[k]:!p[k]}));
+
+  const addType=async(name)=>{
+    const{error}=await sb.from("finish_types").insert({name,sort_order:types.length+1});
+    if(error)return notify(error.message,"error");
+    notify("Тип создан");refresh();
+  };
+  const delType=async(id,name)=>{
+    if(!confirm(`Удалить тип «${name}» и все его шаблоны?`))return;
+    const{error}=await sb.from("finish_types").delete().eq("id",id);
+    if(error)return notify(error.message,"error");
+    notify("Удалено");refresh();
+  };
+  const addItem=async(typeId,data)=>{
+    const sort=items.filter(i=>i.finish_type_id===typeId).length+1;
+    const{error}=await sb.from("finish_template_items").insert({finish_type_id:typeId,...data,sort_order:sort});
+    if(error)return notify(error.message,"error");
+    notify("Материал добавлен");refresh();
+  };
+  const delItem=async(id)=>{
+    const{error}=await sb.from("finish_template_items").delete().eq("id",id);
+    if(error)return notify(error.message,"error");
+    notify("Удалено");refresh();
+  };
+
+  const modeLabel={per_sqm:"на м²",per_perim:"на п.м. периметра",step:"шаг (мм)",fixed:"фиксир."};
+  const modeIcon={per_sqm:"📐",per_perim:"📏",step:"📊",fixed:"🔢"};
+
+  return(<div>
+    <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:10}}>
+      Шаблоны черновых материалов по типу покрытия. При расчёте автоматически добавляются к выбранному чистовому материалу.
+    </div>
+    <button onClick={()=>setModal({type:"addType"})} style={{padding:"6px 14px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer",marginBottom:12}}>＋ Новый тип покрытия</button>
+
+    {types.map(ft=>{
+      const ftItems=items.filter(i=>i.finish_type_id===ft.id);
+      const k=`ft_${ft.id}`;
+      return(<div key={ft.id} className="tree-node">
+        <div className="tree-toggle" onClick={()=>tog(k)}>
+          <span className={`tree-arrow${expanded[k]?" open":""}`}>▶</span>
+          <span className="tree-label" style={{fontWeight:600,color:"var(--accent)"}}>{ft.name}</span>
+          <span className="tree-count">{ftItems.length} мат.</span>
+          <div className="tree-actions" onClick={e=>e.stopPropagation()}>
+            <button className="tree-btn" onClick={()=>setModal({type:"addTplItem",typeId:ft.id,typeName:ft.name})}>＋</button>
+            <button className="tree-btn del" onClick={()=>delType(ft.id,ft.name)}>✕</button>
+          </div>
+        </div>
+        {expanded[k]&&<div className="tree-lvl">
+          {ftItems.length===0&&<div style={{fontSize:12,color:"var(--text-dim)",padding:"4px 10px"}}>Нет черновых материалов</div>}
+          {ftItems.map(it=>(
+            <div key={it.id} className="tree-mat">
+              <span style={{fontSize:12,width:18,textAlign:"center"}}>{modeIcon[it.calc_mode]||"?"}</span>
+              <span className="nm">{it.material_name}</span>
+              <span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text-muted)"}}>{it.qty} {it.calc_mode==="step"?"мм":it.unit}</span>
+              <span style={{fontSize:10,color:"var(--text-dim)",padding:"1px 6px",borderRadius:8,background:"var(--card)"}}>{modeLabel[it.calc_mode]}</span>
+              <button className="tree-btn del" onClick={()=>delItem(it.id)}>✕</button>
+            </div>
+          ))}
+        </div>}
+      </div>);
+    })}
+
+    {modal&&modal.type==="addType"&&<ModalAddSimple title="Новый тип покрытия" placeholder="Вагонка Евро, ПВХ, Ламинат..." onSave={(n)=>{addType(n);setModal(null)}} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="addTplItem"&&<ModalAddTplItem typeName={modal.typeName} onSave={(d)=>{addItem(modal.typeId,d);setModal(null)}} onClose={()=>setModal(null)}/>}
+  </div>);
+}
+
+function ModalAddTplItem({typeName,onSave,onClose}){
+  const[f,setF]=useState({material_name:"",calc_mode:"fixed",qty:1,unit:"шт."});
+  return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="modal-box">
+      <div className="modal-title">Черновой материал для «{typeName}»</div>
+      <div className="m-field"><div className="m-label">Название материала</div><input className="m-inp" value={f.material_name} onChange={e=>setF({...f,material_name:e.target.value})} placeholder="Рейка 20х40х3000 мм" autoFocus/></div>
+      <div className="m-row">
+        <div className="m-field" style={{flex:1}}><div className="m-label">Режим расчёта</div>
+          <select className="m-inp" value={f.calc_mode} onChange={e=>setF({...f,calc_mode:e.target.value})}>
+            <option value="fixed">🔢 Фиксировано</option>
+            <option value="per_sqm">📐 На 1 м² площади</option>
+            <option value="per_perim">📏 На 1 п.м. периметра</option>
+            <option value="step">📊 Обрешётка (шаг мм)</option>
+          </select>
+        </div>
+        <div className="m-field" style={{flex:1}}><div className="m-label">{f.calc_mode==="step"?"Шаг (мм)":f.calc_mode==="fixed"?"Количество":"Коэффициент"}</div>
+          <input type="number" className="m-inp" value={f.qty||""} onChange={e=>setF({...f,qty:Number(e.target.value)||0})} min="0" step="0.001"/>
+        </div>
+      </div>
+      {f.calc_mode!=="step"&&<div className="m-field"><div className="m-label">Единица</div>
+        <select className="m-inp" value={f.unit} onChange={e=>setF({...f,unit:e.target.value})}>
+          {UNITS.map(u=><option key={u}>{u}</option>)}
+        </select>
+      </div>}
+      <div style={{fontSize:11,color:"var(--text-dim)",marginTop:8,lineHeight:1.5,background:"var(--bg)",padding:10,borderRadius:8}}>
+        {f.calc_mode==="fixed"&&<>Будет добавлено ровно <b>{f.qty} {f.unit}</b> независимо от размеров</>}
+        {f.calc_mode==="per_sqm"&&<>На стену 3м² будет: <b>{Math.ceil(f.qty*3)} {f.unit}</b> (коэф. {f.qty} × площадь)</>}
+        {f.calc_mode==="per_perim"&&<>Для периметра 8м: <b>{Math.ceil(f.qty*8)} {f.unit}</b> (коэф. {f.qty} × периметр)</>}
+        {f.calc_mode==="step"&&<>Обрешётка через <b>{f.qty}мм</b>. Для стены 3×1м ≈ <b>{Math.ceil((3/((f.qty||500)/1000))+1)} шт.</b> реек 3м</>}
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:12}}>
+        <button className="m-btn" onClick={()=>{if(!f.material_name.trim())return;onSave(f)}} style={{flex:1}}>Добавить</button>
+        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+      </div>
+    </div>
+  </div>);
+}
+
 function ModalAddSimple({title,placeholder,onSave,onClose}){
   const[v,setV]=useState("");
   return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
@@ -652,14 +767,46 @@ function calcFloorExtras(lengthMm, widthMm){
 }
 
 // ── Main calculation ──
+// ── Calculate template items based on dimensions ──
+function calcTemplateItems(tplItems, heightMm, widthMm){
+  const areaSqm=(heightMm/1000)*(widthMm/1000);
+  const perimM=2*(heightMm/1000+widthMm/1000);
+  const results=[];
+  tplItems.forEach(ti=>{
+    let qty=0;
+    if(ti.calc_mode==="fixed"){qty=ti.qty}
+    else if(ti.calc_mode==="per_sqm"){qty=Math.ceil(ti.qty*areaSqm)}
+    else if(ti.calc_mode==="per_perim"){qty=Math.ceil(ti.qty*perimM)}
+    else if(ti.calc_mode==="step"){
+      // Обрешётка: шаг в мм, считаем кол-во 3м реек
+      const stepM=(ti.qty||500)/1000;
+      const h=heightMm/1000,w=widthMm/1000;
+      const rows=Math.ceil(Math.max(h,w)/stepM)+1;
+      const rowLen=Math.min(h,w);
+      qty=Math.ceil(rows*rowLen/3);
+    }
+    if(qty>0)results.push({name:ti.material_name,qty,unit:ti.calc_mode==="step"?"шт.":ti.unit,price:0,cost:0,auto:true});
+  });
+  return results;
+}
+
+// ── Find finish type by material color (type) field ──
+function findFinishType(mat, finishTypes){
+  if(!mat||!mat.color)return null;
+  const matType=mat.color.trim().toLowerCase();
+  return finishTypes.find(ft=>matType.includes(ft.name.toLowerCase())||ft.name.toLowerCase().includes(matType));
+}
+
 function doCalc(sel,db){
   const res={};
+  const ftItems=db.finishTemplateItems||[];
+  const ftTypes=db.finishTypes||[];
+
   TABS.forEach(tab=>{
     const items=[];
     const ts=sel[tab.id]||{};
     const dims=ts._dims||{};
     const isSurface=SURFACE_IDS.includes(tab.id);
-    const isFloor=tab.id==="floor";
     const heightMm=dims.height||0;
     const widthMm=dims.length||0;
     const areaSqm=(heightMm/1000)*(widthMm/1000);
@@ -673,38 +820,22 @@ function doCalc(sel,db){
 
       const mats=db.optionMaterials.filter(om=>om.option_id===optId);
 
-      // ── Вид отделки для поверхностей: авто-расчёт по площади ──
+      // ── Вид отделки для поверхностей: авто-расчёт по площади + шаблоны ──
       if(isSurface && cat.name==="Вид отделки" && areaSqm>0){
         mats.forEach(om=>{
           const mat=om.materials;if(!mat)return;
-          // Рассчитываем кол-во чистового материала по размерам из каталога
           let qty=calcMatQty(areaSqm, mat.dimensions);
           if(om.visible){const uq=ts[`_q_${cat.id}_${om.material_id}`];if(uq!==undefined)qty=uq}
           if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+
+          // Найти тип покрытия → применить шаблон черновых
+          const ft=findFinishType(mat, ftTypes);
+          if(ft){
+            const tplItems=ftItems.filter(i=>i.finish_type_id===ft.id);
+            calcTemplateItems(tplItems, heightMm, widthMm).forEach(ti=>items.push(ti));
+          }
         });
-        // Авто-добавляем обрешётку
-        const reykaQty=calcReyka(heightMm,widthMm);
-        if(reykaQty>0)items.push({name:"Рейка 20х40х3000 мм",qty:reykaQty,unit:"шт.",price:0,cost:0,auto:true});
-        // Уголок хвоя (по углам стены ≈ 3шт стандарт)
-        if(!isFloor){
-          items.push({name:"Уголок хвоя 40х40х2500 мм",qty:3,unit:"шт.",price:0,cost:0,auto:true});
-          // Раскладка по периметру
-          const trimM=calcTrim(heightMm,widthMm);
-          if(trimM>0)items.push({name:"Раскладка хвоя 40х40х2500 мм",qty:trimM,unit:"п.м.",price:0,cost:0,auto:true});
-        }
-        // Пол — доп. материалы
-        if(isFloor && areaSqm>0){
-          const fe=calcFloorExtras(widthMm,heightMm);
-          items.push({name:"Брус 50х50х3000 мм (лаги)",qty:fe.brus,unit:"шт.",price:0,cost:0,auto:true});
-          items.push({name:"ОСБ 2500х1250х12 мм",qty:Math.ceil(fe.osb),unit:"м²",price:0,cost:0,auto:true});
-          items.push({name:"Плинтуса",qty:Math.round(fe.plintus*10)/10,unit:"п.м.",price:0,cost:0,auto:true});
-        }
-        // Потолок — П-профиль
-        if(tab.id==="ceiling" && areaSqm>0){
-          const pprofM=2*(widthMm/1000 + heightMm/1000);
-          items.push({name:"П-профиль",qty:Math.ceil(pprofM),unit:"п.м.",price:0,cost:0,auto:true});
-        }
-        return; // done with this category
+        return;
       }
 
       // ── Утепление: авто-расчёт по площади ──
@@ -718,12 +849,7 @@ function doCalc(sel,db){
         return;
       }
 
-      // ── Покраска: авто-расчёт по площади ──
-      if(isSurface && cat.name==="Покраска" && areaSqm>0){
-        const paintQty=calcPaint(areaSqm);
-        items.push({name:"Краска в 2 слоя",qty:paintQty,unit:"л.",price:0,cost:0,auto:true});
-        return;
-      }
+      // ── Покраска: убрана жёсткая логика — теперь через шаблоны ──
 
       // ── Всё остальное: стандартная логика (фиксированные привязки) ──
       mats.forEach(om=>{
@@ -1209,6 +1335,11 @@ function App(){
         {/* СПРАВОЧНИК */}
         <Sec title="Справочник" icon="📖">
           <TreeRef db={db} refresh={refresh} notify={notify}/>
+        </Sec>
+
+        {/* ШАБЛОНЫ ЧЕРНОВЫХ */}
+        <Sec title="Шаблоны черновых" icon="📐">
+          <TemplatesSection db={db} refresh={refresh} notify={notify}/>
         </Sec>
 
         {/* СКЛАД */}
