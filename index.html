@@ -840,23 +840,26 @@ function DynTab({tabId,db,sel,setSel}){
       if(md.d>0)return Math.ceil(pm/(md.d/1000));
       return Math.ceil(pm);
     };
+    const matLen=(mat)=>{const md=parseDims(mat?.dimensions);return md.d>0?(md.d/1000):0};
 
     // Расчёт по режиму → {qty: штуки, hint: подсказка}
     const calcResult=(baseQty,mode,mat)=>{
       if(!baseQty||baseQty<=0)return{qty:0,hint:""};
       if(hMm<=0&&wMm<=0&&mode!=="fixed")return{qty:0,hint:"нет размеров"};
+      const ml=matLen(mat);
+      const noSize=ml<=0&&mode!=="fixed"&&mode!=="per_sqm"?" ⚠️ укажите размеры материала!":"";
       
       if(mode==="fixed")return{qty:baseQty,hint:baseQty+" шт. (фикс.)"};
       
       if(mode==="width"||mode==="width_top"){
         const pm=baseQty*wM;
         const sht=pmToSht(pm,mat);
-        return{qty:sht,hint:baseQty+"/м × "+wM.toFixed(1)+"м"+(mode==="width_top"?" (верх)":"")+" = "+pm.toFixed(1)+"п.м. → "+sht+"шт."};
+        return{qty:sht,hint:baseQty+"/м × "+wM.toFixed(1)+"м"+(mode==="width_top"?" (верх)":"")+" = "+pm.toFixed(1)+"п.м. → "+sht+"шт."+noSize};
       }
       if(mode==="height"){
         const pm=baseQty*hM*2;
         const sht=pmToSht(pm,mat);
-        return{qty:sht,hint:baseQty+"/м × "+hM.toFixed(1)+"м × 2бок = "+pm.toFixed(1)+"п.м. → "+sht+"шт."};
+        return{qty:sht,hint:baseQty+"/м × "+hM.toFixed(1)+"м × 2бок = "+pm.toFixed(1)+"п.м. → "+sht+"шт."+noSize};
       }
       if(mode==="per_sqm"){
         const q=Math.ceil(baseQty*areaSqm);
@@ -871,18 +874,18 @@ function DynTab({tabId,db,sel,setSel}){
         else{strips=Math.floor(hMm/stepMm)+1;stripLen=wMm}
         const totalM=strips*stripLen/1000;
         const sht=pmToSht(totalM,mat);
-        return{qty:sht,hint:"шаг "+stepMm+"мм → "+strips+"полос × "+(stripLen/1000).toFixed(1)+"м = "+totalM.toFixed(1)+"п.м. → "+sht+"шт."};
+        return{qty:sht,hint:"шаг "+stepMm+"мм → "+strips+"полос × "+(stripLen/1000).toFixed(1)+"м = "+totalM.toFixed(1)+"п.м. → "+sht+"шт."+noSize};
       }
       if(mode==="area_sheet"){
         const md=parseDims(mat?.dimensions);
         const matAreaSqm=md.d*md.s/1e6;
         if(matAreaSqm>0&&areaSqm>0){const q=Math.ceil(areaSqm/matAreaSqm*1.1*baseQty);return{qty:q,hint:areaSqm.toFixed(2)+"м² ÷ "+matAreaSqm.toFixed(3)+"м² ×1.1 = "+q+"шт."}}
-        return{qty:baseQty,hint:"⚠️ нет размеров"};
+        return{qty:baseQty,hint:"⚠️ укажите размеры материала в базе"};
       }
       // perim
       const pm=baseQty*perimM;
       const sht=pmToSht(pm,mat);
-      return{qty:sht,hint:baseQty+"/м × P"+perimM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м. → "+sht+"шт."};
+      return{qty:sht,hint:baseQty+"/м × P"+perimM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м. → "+sht+"шт."+noSize};
     };
 
     const renderMat=(om,isHidden)=>{
@@ -1140,9 +1143,10 @@ function DynTab({tabId,db,sel,setSel}){
             if(!base||base<=0)return{qty:0,hint:""};
             const ml=matLen(mat);
             const lenInfo=ml>0?" ÷ "+ml+"м":"";
+            const noSize=ml<=0?" ⚠️ укажите размеры материала в базе!":"";
             if(mode==="fixed")return{qty:base,hint:base+" шт. (фикс.)"};
-            if(mode==="width"||mode==="width_top"){const pm=base*wM;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × "+wM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."}}
-            if(mode==="height"){const pm=base*hM*2;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × "+hM.toFixed(1)+"м × 2 = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."+(ml<=0?" ⚠️ нет размеров материала!":"")}}
+            if(mode==="width"||mode==="width_top"){const pm=base*wM;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × "+wM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."+noSize}}
+            if(mode==="height"){const pm=base*hM*2;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × "+hM.toFixed(1)+"м × 2 = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."+noSize}}
             if(mode==="per_sqm"){const q=Math.ceil(base*areaSqm);return{qty:q,hint:base+"/м² × "+areaSqm.toFixed(2)+"м² = "+q+"шт."}}
             if(mode==="step"&&hMm>0&&wMm>0){
               const stepMm=base;
@@ -1151,14 +1155,14 @@ function DynTab({tabId,db,sel,setSel}){
               else{strips=Math.floor(hMm/stepMm)+1;stripLen=wMm}
               const totalM=strips*stripLen/1000;
               const s=toSht(totalM,mat);
-              return{qty:s,hint:"шаг "+stepMm+"мм → "+strips+"пол.×"+(stripLen/1000).toFixed(1)+"м = "+totalM.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."};
+              return{qty:s,hint:"шаг "+stepMm+"мм → "+strips+"пол.×"+(stripLen/1000).toFixed(1)+"м = "+totalM.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."+noSize};
             }
-            if(mode==="perim"){const pm=base*perimM;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × P"+perimM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."}}
+            if(mode==="perim"){const pm=base*perimM;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × P"+perimM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."+noSize}}
             if(mode==="area_sheet"){
               const md=parseDims(mat?.dimensions);
               const matAreaSqm=md.d*md.s/1e6;
               if(matAreaSqm>0&&areaSqm>0){const q=Math.ceil(areaSqm/matAreaSqm*1.1*base);return{qty:q,hint:areaSqm.toFixed(2)+"м² ÷ "+matAreaSqm.toFixed(3)+"м² ×1.1 = "+q+"шт."}}
-              return{qty:base,hint:"⚠️ нет размеров материала для расчёта площади"};
+              return{qty:base,hint:"⚠️ укажите размеры материала в базе для расчёта площади"};
             }
             return{qty:base,hint:""};
           };
@@ -2189,11 +2193,24 @@ function App(){
   const[results,setResults]=useState(null);
   const[orderInfo,setOI]=useState({order_number:"",address:"",phone:""});
   const[collapseKey,setCollapseKey]=useState(0);
+  const[showOrders,setShowOrders]=useState(false);
 
   const notify=useCallback((msg,type="ok")=>setNotif({msg,type}),[]);
   const refresh=useCallback(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}},[]);
   useEffect(()=>{window._refreshDb=refresh},[refresh]);
   useEffect(()=>{(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}setLoading(false)})()},[]);
+
+  // Автонумерация заказов
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const{data}=await sb.from("orders").select("order_number").order("created_at",{ascending:false}).limit(1);
+        const last=data&&data[0]?.order_number||"";
+        const num=parseInt(last.replace(/\D/g,""))||0;
+        setOI(p=>({...p,order_number:String(num+1)}));
+      }catch(e){}
+    })();
+  },[]);
 
   const handleCalc=()=>{
     if(!db)return;
@@ -2219,11 +2236,14 @@ function App(){
     <div style={{background:"linear-gradient(135deg,var(--card),var(--bg))",borderBottom:"1px solid var(--border)",padding:16,position:"sticky",top:0,zIndex:100,backdropFilter:"blur(20px)"}}>
       <div style={{maxWidth:720,margin:"0 auto"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-          <div><div style={{fontSize:11,color:"var(--accent)",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:2}}>Калькулятор</div><div style={{fontSize:18,fontWeight:700}}>Расчёт материалов для балконов</div></div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{background:"var(--warning)",color:"var(--bg)",fontWeight:800,fontSize:18,padding:"4px 10px",borderRadius:8,fontFamily:"var(--font)",letterSpacing:1}}>К2</div>
+            <div style={{fontSize:17,fontWeight:700,letterSpacing:0.5}}>Калькулятор</div>
+          </div>
           <div style={{display:"flex",gap:6,flexShrink:0}}>
-            {!showSum&&<button onClick={()=>setCollapseKey(k=>k+1)} style={{padding:"8px 14px",borderRadius:10,background:"var(--card)",color:"var(--text-muted)",border:"1px solid var(--border)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>↑ Свернуть</button>}
-            {showSum&&<button onClick={()=>setShowSum(false)} style={{padding:"8px 14px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>← Назад</button>}
-            {!showSum&&<button onClick={handleCalc} style={{padding:"8px 14px",borderRadius:10,background:"var(--success-soft)",color:"var(--success)",border:"1px solid var(--success)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>Итого</button>}
+            {!showSum&&<button onClick={()=>setCollapseKey(k=>k+1)} style={{padding:"7px 12px",borderRadius:10,background:"var(--card)",color:"var(--text-muted)",border:"1px solid var(--border)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer"}}>↑ Свернуть</button>}
+            {!showSum&&<button onClick={()=>setShowOrders(true)} style={{padding:"7px 12px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer"}}>📋 Заказы</button>}
+            {showSum&&<button onClick={()=>setShowSum(false)} style={{padding:"7px 12px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer"}}>← Назад</button>}
           </div>
         </div>
         {/* Order info */}
@@ -2260,15 +2280,8 @@ function App(){
         ))}
 
         {/* ЗАКАЗЫ */}
-        <Sec title="Заказы" icon="📋" collapseKey={collapseKey}>
-          <OrdersSection notify={notify} onLoadOrder={(o)=>{
-            setSel(o.form_data||{});
-            setOI({order_number:o.order_number||"",address:o.address||"",phone:o.phone||""});
-            setResults(null);
-            setShowSum(false);
-            notify("Заказ загружен для редактирования");
-          }}/>
-        </Sec>
+        {/* ОТСТУП */}
+        <div style={{height:24,borderTop:"1px dashed var(--border)",margin:"10px 0"}}/>
 
         {/* СПРАВОЧНИК */}
         <Sec title="Справочник" icon="📖" collapseKey={collapseKey}>
@@ -2285,8 +2298,28 @@ function App(){
     </div>
 
     {/* Floating calc button */}
-    {!showSum&&db&&<div onClick={handleCalc} style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"var(--accent)",color:"var(--bg)",padding:"12px 24px",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 8px 32px var(--accent-glow)",zIndex:200,animation:"slideUp .4s",display:"flex",alignItems:"center",gap:10,maxWidth:"92vw",fontFamily:"var(--font)"}}>
+    {!showSum&&db&&<div onClick={handleCalc} style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"var(--accent)",color:"var(--bg)",padding:"12px 24px",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",boxShadow:"0 8px 32px var(--accent-glow)",zIndex:200,display:"flex",alignItems:"center",gap:10,maxWidth:"92vw",fontFamily:"var(--font)"}}>
       🧮 Рассчитать{gt>0&&<span style={{fontFamily:"var(--mono)",fontWeight:700}}>{gt.toLocaleString("ru")} ₽</span>}
+    </div>}
+
+    {/* Модалка Заказов */}
+    {showOrders&&<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)setShowOrders(false)}}>
+      <div className="modal-box" style={{maxWidth:560,maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div className="modal-title" style={{margin:0}}>📋 Заказы</div>
+          <button onClick={()=>setShowOrders(false)} style={{background:"none",border:"none",color:"var(--text-muted)",fontSize:20,cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{flex:1,overflowY:"auto"}}>
+          <OrdersSection notify={notify} onLoadOrder={(o)=>{
+            setSel(o.form_data||{});
+            setOI({order_number:o.order_number||"",address:o.address||"",phone:o.phone||""});
+            setResults(null);
+            setShowSum(false);
+            setShowOrders(false);
+            notify("Заказ загружен для редактирования");
+          }}/>
+        </div>
+      </div>
     </div>}
   </div>);
 }
