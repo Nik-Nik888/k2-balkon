@@ -358,6 +358,37 @@ function TreeRef({db,refresh,notify}){
     notify("Удалено");refresh();
   };
 
+  // ── Шаблоны скрытых ──
+  const saveTemplate=async(optionId,optionName)=>{
+    const mats=(optMats[optionId]||[]).filter(m=>!m.visible);
+    if(mats.length===0)return notify("Нет скрытых материалов для сохранения","error");
+    const name=prompt("Название шаблона:",optionName+" — черновые");
+    if(!name||!name.trim())return;
+    const items=mats.map(m=>({material_id:m.material_id,quantity:m.quantity,visible:false,calc_mode:m.calc_mode||"fixed"}));
+    const{error}=await sb.from("binding_templates").insert({name:name.trim(),items});
+    if(error)return notify(error.message,"error");
+    notify("Шаблон «"+name.trim()+"» сохранён ("+items.length+" мат.)");
+  };
+  const loadTemplates=async()=>{
+    const{data}=await sb.from("binding_templates").select("*").order("created_at",{ascending:false});
+    return data||[];
+  };
+  const applyTemplate=async(optionId,template)=>{
+    const items=template.items||[];
+    let added=0;
+    for(const it of items){
+      const{error}=await sb.from("option_materials").insert({option_id:optionId,material_id:it.material_id,quantity:it.quantity,visible:it.visible!==undefined?it.visible:false,calc_mode:it.calc_mode||"fixed"});
+      if(!error)added++;
+    }
+    notify("Добавлено "+added+" материалов из шаблона «"+template.name+"»");
+    refresh();
+  };
+  const delTemplate=async(id,name)=>{
+    if(!confirm("Удалить шаблон «"+name+"»?"))return;
+    await sb.from("binding_templates").delete().eq("id",id);
+    notify("Шаблон удалён");
+  };
+
   return(<div>
     <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:14,display:"flex",alignItems:"center",gap:4}}>
       📦 {db.materials.length} материалов в справочнике
@@ -413,6 +444,7 @@ function TreeRef({db,refresh,notify}){
                       </span>
                       <div className="tree-actions" onClick={e=>e.stopPropagation()}>
                         {!noBinding&&<button className="tree-btn" title="Привязать материал" onClick={()=>setModal({type:"binding",optionId:opt.id,optionName:opt.name})}>＋</button>}
+                        {!noBinding&&mats.filter(m=>!m.visible).length>0&&<button className="tree-btn" title="Сохранить скрытые как шаблон" onClick={()=>saveTemplate(opt.id,opt.name)} style={{color:"var(--success)"}}>💾</button>}
                         <button className="tree-btn del" title="Удалить вариант" onClick={()=>delOption(opt.id,opt.name)}>✕</button>
                       </div>
                     </div>
@@ -451,7 +483,7 @@ function TreeRef({db,refresh,notify}){
     {/* MODALS */}
     {modal&&modal.type==="category"&&<ModalAddSimple title={`Новая категория в «${modal.tabLabel}»`} placeholder="Название категории" onSave={(name)=>{addCategory(modal.tabId,name);setModal(null)}} onClose={()=>setModal(null)}/>}
     {modal&&modal.type==="option"&&<ModalAddSimple title={`Новый вариант в «${modal.catName}»`} placeholder="Название (ДА, НЕТ, Балкон 3м...)" onSave={(name)=>{addOption(modal.catId,name);setModal(null)}} onClose={()=>setModal(null)}/>}
-    {modal&&modal.type==="binding"&&<ModalAddBinding title={`Привязка к «${modal.optionName}»`} materials={db.materials} onSave={(matId,qty,vis,cm)=>{addBinding(modal.optionId,matId,qty,vis,cm);setModal(null)}} onClose={()=>setModal(null)}/>}
+    {modal&&modal.type==="binding"&&<ModalAddBinding title={`Привязка к «${modal.optionName}»`} materials={db.materials} onSave={(matId,qty,vis,cm)=>{addBinding(modal.optionId,matId,qty,vis,cm);setModal(null)}} onClose={()=>setModal(null)} onLoadTemplates={loadTemplates} onApplyTemplate={(tpl)=>applyTemplate(modal.optionId,tpl)} onDelTemplate={delTemplate}/>}
     {modal&&modal.type==="editBinding"&&<ModalEditBinding binding={modal.binding} onSave={(id,qty,vis,cm)=>{updateBinding(id,qty,vis,cm);setModal(null)}} onClose={()=>setModal(null)}/>}
   </div>);
 }
@@ -534,77 +566,128 @@ function ModalEditBinding({binding,onSave,onClose}){
   </div>);
 }
 
-function ModalAddBinding({title,materials,onSave,onClose}){
+function ModalAddBinding({title,materials,onSave,onClose,onLoadTemplates,onApplyTemplate,onDelTemplate}){
   const[matId,setMatId]=useState("");
   const[qty,setQty]=useState(1);
   const[vis,setVis]=useState(false);
-  const[cm,setCm]=useState("perim");
+  const[cm,setCm]=useState("fixed");
   const[search,setSearch]=useState("");
+  const[tab,setTab]=useState("manual"); // manual | template
+  const[templates,setTemplates]=useState([]);
+  const[tplLoading,setTplLoading]=useState(false);
   const filtered=materials.filter(m=>m.name.toLowerCase().includes(search.toLowerCase()));
   const selectedMat=materials.find(m=>String(m.id)===String(matId));
+
+  const loadTpl=async()=>{setTplLoading(true);const t=await onLoadTemplates();setTemplates(t);setTplLoading(false)};
+
   return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="modal-box">
       <div className="modal-title">{title}</div>
-      <div className="m-field">
-        <div className="m-label">Поиск материала</div>
-        <input className="m-inp" value={search} onChange={e=>{setSearch(e.target.value);setMatId("")}} placeholder="Начните вводить название..." autoFocus/>
+      {/* Вкладки: Вручную / Из шаблона */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <Ch label="＋ Вручную" active={tab==="manual"} onClick={()=>setTab("manual")}/>
+        <Ch label="📋 Из шаблона" active={tab==="template"} onClick={()=>{setTab("template");if(templates.length===0)loadTpl()}}/>
       </div>
-      {/* Список найденных */}
-      <div style={{maxHeight:180,overflowY:"auto",marginBottom:10,border:"1px solid var(--border)",borderRadius:10,background:"var(--bg)"}}>
-        {(search?filtered:materials.slice(0,20)).map(m=>(
-          <div key={m.id} onClick={()=>{setMatId(String(m.id));setSearch(m.name)}}
-            style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid var(--border)",
-              background:String(m.id)===String(matId)?"var(--accent-soft)":"transparent",
-              display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,transition:"background .1s"}}
-            onMouseEnter={e=>e.currentTarget.style.background="var(--accent-soft)"} onMouseLeave={e=>{if(String(m.id)!==String(matId))e.currentTarget.style.background="transparent"}}>
-            <span style={{fontSize:13,flex:1}}>{m.name}</span>
-            {m.price>0&&<span className="price-tag">{m.price}₽</span>}
-            <span style={{fontSize:10,color:"var(--text-dim)"}}>{m.unit}</span>
-          </div>
-        ))}
-        {search&&filtered.length===0&&<div style={{padding:12,textAlign:"center",color:"var(--text-dim)",fontSize:12}}>Не найдено</div>}
-      </div>
-      {selectedMat&&<div style={{padding:"6px 10px",borderRadius:8,background:"var(--success-soft)",marginBottom:10,fontSize:12,color:"var(--success)"}}>
-        ✓ {selectedMat.name} {selectedMat.price?`— ${selectedMat.price}₽`:""}/{selectedMat.unit}
-      </div>}
-      <div className="m-field"><div className="m-label">Режим расчёта</div>
-        <select className="m-inp" value={cm} onChange={e=>{const v=e.target.value;setCm(v);setQty(v==="step"?500:v==="per_sqm"?6:v==="area_sheet"?1:v==="fixed"?1:1)}}>
-          <option value="fixed">🔢 Фиксированное кол-во</option>
-          <option value="perim">📐 По периметру (весь P)</option>
-          <option value="width">↔ По ширине (низ)</option>
-          <option value="width_top">↔ По ширине (верх)</option>
-          <option value="height">↕ По высоте (бок × 2)</option>
-          <option value="per_sqm">📐 На 1 м² площади</option>
-          <option value="step">📊 Обрешётка (шаг мм)</option>
-          <option value="area_sheet">📐 Площадной (м² стены ÷ м² материала +10%)</option>
-        </select>
-      </div>
-      <div className="m-row">
-        <div className="m-field" style={{flex:1}}>
-          <div className="m-label">{({fixed:"Количество (штук)",perim:"Кол-во на 1 п.м. периметра",width:"Кол-во на 1 п.м. ширины (низ)",width_top:"Кол-во на 1 п.м. ширины (верх)",height:"Кол-во на 1 п.м. высоты",per_sqm:"Кол-во на 1 м²",step:"Шаг обрешётки (мм)",area_sheet:"Количество (обычно 1)"})[cm]||"Количество"}</div>
-          <input type="number" className="m-inp" value={qty} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step={cm==="step"?"10":"0.1"} placeholder={({perim:"2",width:"1",width_top:"1",height:"1",fixed:"1",per_sqm:"6",step:"500"})[cm]||"0"}/>
+
+      {/* ── Вкладка: Вручную ── */}
+      {tab==="manual"&&<div>
+        <div className="m-field">
+          <div className="m-label">Поиск материала</div>
+          <input className="m-inp" value={search} onChange={e=>{setSearch(e.target.value);setMatId("")}} placeholder="Начните вводить название..." autoFocus/>
         </div>
-        <div className="m-field" style={{flex:1}}><div className="m-label">Видимость</div>
-          <select className="m-inp" value={vis?"open":"hidden"} onChange={e=>setVis(e.target.value==="open")}>
-            <option value="hidden">🔒 Скрытый</option>
-            <option value="open">👁 Открытый</option>
+        <div style={{maxHeight:150,overflowY:"auto",marginBottom:10,border:"1px solid var(--border)",borderRadius:10,background:"var(--bg)"}}>
+          {(search?filtered:materials.slice(0,20)).map(m=>(
+            <div key={m.id} onClick={()=>{setMatId(String(m.id));setSearch(m.name)}}
+              style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid var(--border)",
+                background:String(m.id)===String(matId)?"var(--accent-soft)":"transparent",
+                display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,transition:"background .1s"}}
+              onMouseEnter={e=>e.currentTarget.style.background="var(--accent-soft)"} onMouseLeave={e=>{if(String(m.id)!==String(matId))e.currentTarget.style.background="transparent"}}>
+              <span style={{fontSize:13,flex:1}}>{m.name}</span>
+              {m.price>0&&<span className="price-tag">{m.price}₽</span>}
+              <span style={{fontSize:10,color:"var(--text-dim)"}}>{m.unit}</span>
+            </div>
+          ))}
+          {search&&filtered.length===0&&<div style={{padding:12,textAlign:"center",color:"var(--text-dim)",fontSize:12}}>Не найдено</div>}
+        </div>
+        {selectedMat&&<div style={{padding:"6px 10px",borderRadius:8,background:"var(--success-soft)",marginBottom:10,fontSize:12,color:"var(--success)"}}>
+          ✓ {selectedMat.name} {selectedMat.price?`— ${selectedMat.price}₽`:""}/{selectedMat.unit}
+        </div>}
+        <div className="m-field"><div className="m-label">Режим расчёта</div>
+          <select className="m-inp" value={cm} onChange={e=>{const v=e.target.value;setCm(v);setQty(v==="step"?500:v==="per_sqm"?6:v==="area_sheet"?1:v==="fixed"?1:1)}}>
+            <option value="fixed">🔢 Фиксированное кол-во</option>
+            <option value="perim">📐 По периметру (весь P)</option>
+            <option value="width">↔ По ширине (низ)</option>
+            <option value="width_top">↔ По ширине (верх)</option>
+            <option value="height">↕ По высоте (бок × 2)</option>
+            <option value="per_sqm">📐 На 1 м² площади</option>
+            <option value="step">📊 Обрешётка (шаг мм)</option>
+            <option value="area_sheet">📐 Площадной (м² ÷ м² +10%)</option>
           </select>
         </div>
-      </div>
-      <div style={{fontSize:11,color:"var(--text-dim)",marginTop:6,lineHeight:1.5,background:"var(--bg)",padding:8,borderRadius:8}}>
-        {cm==="fixed"&&<>🔢 Фиксированное кол-во, не зависит от размеров</>}
-        {cm==="perim"&&<>📐 Кол-во × периметр рамы P=2×(H+W). <b>Введите сколько на 1 п.м.</b></>}
-        {cm==="width"&&<>↔ Кол-во × ширина (низ). <b>Введите сколько на 1 п.м.</b> Подоконник, подставочная доска</>}
-        {cm==="width_top"&&<>↔ Кол-во × ширина (верх). <b>Введите сколько на 1 п.м.</b> Козырёк, верхняя планка</>}
-        {cm==="height"&&<>↕ Кол-во × высота × 2 стороны. <b>Введите сколько на 1 п.м.</b></>}
-        {cm==="per_sqm"&&<>📐 Кол-во × площадь стены (H×W). <b>Введите сколько на 1 м².</b> Клеймер, подложка</>}
-        {cm==="area_sheet"&&<>📐 Площадь стены ÷ площадь материала +10%. Размеры берутся из поля «Размеры» материала. <b>Кол-во = 1</b></>}
-        {cm==="step"&&<>📊 Обрешётка: рейки перпенд. отделке. <b>Введите шаг в мм</b> (напр. 500)</>}
-      </div>
-      <div style={{display:"flex",gap:8,marginTop:12}}>
-        <button className="m-btn" onClick={()=>{if(matId)onSave(Number(matId),qty,vis,cm)}} style={{flex:1}}>Привязать</button>
-        <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
-      </div>
+        <div className="m-row">
+          <div className="m-field" style={{flex:1}}>
+            <div className="m-label">{({fixed:"Количество (штук)",perim:"Кол-во на 1 п.м. периметра",width:"Кол-во на 1 п.м. ширины (низ)",width_top:"Кол-во на 1 п.м. ширины (верх)",height:"Кол-во на 1 п.м. высоты",per_sqm:"Кол-во на 1 м²",step:"Шаг обрешётки (мм)",area_sheet:"Количество (обычно 1)"})[cm]||"Количество"}</div>
+            <input type="number" className="m-inp" value={qty} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step={cm==="step"?"10":"0.1"} placeholder={({perim:"2",width:"1",width_top:"1",height:"1",fixed:"1",per_sqm:"6",step:"500",area_sheet:"1"})[cm]||"0"}/>
+          </div>
+          <div className="m-field" style={{flex:1}}><div className="m-label">Видимость</div>
+            <select className="m-inp" value={vis?"open":"hidden"} onChange={e=>setVis(e.target.value==="open")}>
+              <option value="hidden">🔒 Скрытый</option>
+              <option value="open">👁 Открытый</option>
+            </select>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:"var(--text-dim)",marginTop:6,lineHeight:1.5,background:"var(--bg)",padding:8,borderRadius:8}}>
+          {cm==="fixed"&&<>🔢 Фиксированное кол-во</>}
+          {cm==="perim"&&<>📐 Кол-во × периметр P=2×(H+W)</>}
+          {cm==="width"&&<>↔ Кол-во × ширина (низ)</>}
+          {cm==="width_top"&&<>↔ Кол-во × ширина (верх)</>}
+          {cm==="height"&&<>↕ Кол-во × высота × 2</>}
+          {cm==="per_sqm"&&<>📐 Кол-во × площадь (H×W)</>}
+          {cm==="step"&&<>📊 Обрешётка с шагом в мм</>}
+          {cm==="area_sheet"&&<>📐 Площадь стены ÷ площадь материала +10%</>}
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button className="m-btn" onClick={()=>{if(matId)onSave(Number(matId),qty,vis,cm)}} style={{flex:1}}>Привязать</button>
+          <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Отмена</button>
+        </div>
+      </div>}
+
+      {/* ── Вкладка: Из шаблона ── */}
+      {tab==="template"&&<div>
+        {tplLoading&&<div style={{textAlign:"center",padding:24,color:"var(--text-muted)"}}>⏳ Загрузка...</div>}
+        {!tplLoading&&templates.length===0&&<div style={{textAlign:"center",padding:24,color:"var(--text-dim)"}}>
+          <div style={{fontSize:32,marginBottom:8}}>📋</div>
+          Нет сохранённых шаблонов.<br/>Настройте скрытые материалы у одного варианта,<br/>затем нажмите 💾 чтобы сохранить как шаблон.
+        </div>}
+        {!tplLoading&&templates.map(tpl=>(
+          <div key={tpl.id} style={{background:"var(--bg)",borderRadius:12,border:"1px solid var(--border)",padding:12,marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:14,fontWeight:600,color:"var(--accent)"}}>{tpl.name}</span>
+              <div style={{display:"flex",gap:4}}>
+                <button onClick={async()=>{await onApplyTemplate(tpl);onClose()}} style={{padding:"5px 12px",borderRadius:8,background:"var(--success-soft)",color:"var(--success)",border:"1px solid var(--success)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer"}}>📋 Применить</button>
+                <button onClick={()=>{onDelTemplate(tpl.id,tpl.name);setTemplates(p=>p.filter(t=>t.id!==tpl.id))}} style={{padding:"5px 8px",borderRadius:8,background:"var(--danger-soft)",color:"var(--danger)",border:"none",cursor:"pointer",fontSize:12}}>🗑</button>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:"var(--text-dim)"}}>
+              {(tpl.items||[]).length} материалов • {new Date(tpl.created_at).toLocaleDateString("ru")}
+            </div>
+            <div style={{marginTop:4}}>
+              {(tpl.items||[]).map((it,i)=>{
+                const mat=materials.find(m=>m.id===it.material_id);
+                const cmTag={perim:"📐P",width:"↔низ",width_top:"↔верх",height:"↕бок",fixed:"🔢",per_sqm:"📐м²",step:"📊",area_sheet:"📐лист"}[it.calc_mode]||"🔢";
+                return(<div key={i} style={{display:"flex",gap:6,padding:"2px 8px",fontSize:11,color:"var(--text-muted)"}}>
+                  <span style={{flex:1}}>{mat?.name||"ID:"+it.material_id}</span>
+                  <span>{cmTag}</span>
+                  <span style={{fontFamily:"var(--mono)"}}>{it.quantity}</span>
+                </div>);
+              })}
+            </div>
+          </div>
+        ))}
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button className="m-btn ghost" onClick={onClose} style={{flex:1}}>Закрыть</button>
+        </div>
+      </div>}
     </div>
   </div>);
 }
