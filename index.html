@@ -226,8 +226,10 @@ function generatePDF(results,orderInfo){
 }
 
 // ── UI Components ──
-function Sec({title,icon,children,open:dflt,badge}){
+function Sec({title,icon,children,open:dflt,badge,collapseKey}){
   const[o,setO]=useState(!!dflt);
+  // При изменении collapseKey — свернуть
+  useEffect(()=>{if(collapseKey>0)setO(false)},[collapseKey]);
   return(<div style={{background:"var(--card)",borderRadius:16,border:`1px solid ${o?"var(--border-active)":"var(--border)"}`,marginBottom:14,overflow:"hidden",transition:"border-color .3s",boxShadow:o?"0 0 20px var(--accent-glow)":"none"}}>
     <div onClick={()=>setO(!o)} style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",cursor:"pointer",userSelect:"none"}}>
       <span style={{fontSize:22}}>{icon}</span><span style={{flex:1,fontSize:16,fontWeight:600}}>{title}</span>
@@ -339,14 +341,16 @@ function TreeRef({db,refresh,notify}){
     notify("Удалено");refresh();
   };
   const addBinding=async(optionId,materialId,qty,visible,calcMode)=>{
-    const{error}=await sb.from("option_materials").insert({option_id:optionId,material_id:materialId,quantity:qty,visible,calc_mode:calcMode||"perim"});
+    console.log("addBinding:",{optionId,materialId,qty,visible,calcMode});
+    const{error}=await sb.from("option_materials").insert({option_id:optionId,material_id:materialId,quantity:qty,visible,calc_mode:calcMode||"fixed"});
     if(error)return notify(error.message,"error");
-    notify("Материал привязан");refresh();
+    notify("Материал привязан ("+calcMode+")");refresh();
   };
   const updateBinding=async(id,qty,visible,calcMode)=>{
-    const{error}=await sb.from("option_materials").update({quantity:qty,visible,calc_mode:calcMode||"perim"}).eq("id",id);
+    console.log("updateBinding:",{id,qty,visible,calcMode});
+    const{error}=await sb.from("option_materials").update({quantity:qty,visible,calc_mode:calcMode||"fixed"}).eq("id",id);
     if(error)return notify(error.message,"error");
-    notify("Привязка обновлена");refresh();
+    notify("Обновлено ("+calcMode+")");refresh();
   };
   const delBinding=async(id)=>{
     const{error}=await sb.from("option_materials").delete().eq("id",id);
@@ -419,12 +423,14 @@ function TreeRef({db,refresh,notify}){
                       {/* Подсказка для категорий установки */}
                       {isInstallCat&&mats.length>0&&<div style={{fontSize:10,color:"var(--accent)",padding:"2px 10px",marginBottom:4,background:"var(--accent-soft)",borderRadius:6}}>💡 Кол-во = на 1 п.м. периметра. Погонажный материал (3м доска) пересчитается в штуки</div>}
                       {mats.map(om=>{
-                        const cmLabel={perim:"📐периметр",width:"↔низ",width_top:"↔верх",height:"↕бок×2",fixed:"🔢фикс.",per_sqm:"📐м²",per_perim:"📏п.м.",step:"📊шаг"}[om.calc_mode]||"";
+                        const mode=om.calc_mode||"fixed";
+                        const cmLabel={perim:"📐периметр",width:"↔низ",width_top:"↔верх",height:"↕бок×2",fixed:"🔢фикс.",per_sqm:"📐м²",step:"📊шаг",area_sheet:"📐лист"}[mode]||"";
+                        const qtyText=mode==="step"?om.quantity+" мм (шаг)":mode==="per_sqm"?om.quantity+"/м²":mode==="fixed"?om.quantity+" "+om.materials?.unit:om.quantity+"/п.м.";
                         return(<div key={om.id} className="tree-mat">
                           <span className={`vis-tag ${om.visible?"open":"hidden"}`}>{om.visible?"👁":"🔒"}</span>
                           <span className="nm">{om.materials?.name||"?"}</span>
-                          <span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text-muted)"}}>{om.quantity} {om.materials?.unit}</span>
-                          {isInstallCat&&<span style={{fontSize:9,color:"var(--accent)",padding:"1px 4px",borderRadius:6,background:"var(--accent-soft)"}}>{cmLabel}</span>}
+                          <span style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text-muted)"}}>{qtyText}</span>
+                          {cmLabel&&<span style={{fontSize:9,color:"var(--accent)",padding:"1px 4px",borderRadius:6,background:"var(--accent-soft)"}}>{cmLabel}</span>}
                           {om.materials?.price>0&&<span className="price-tag">{om.materials.price}₽</span>}
                           <button className="tree-btn" title="Редактировать привязку" onClick={()=>setModal({type:"editBinding",binding:om})}>✏️</button>
                           <button className="tree-btn del" onClick={()=>delBinding(om.id)}>✕</button>
@@ -478,14 +484,15 @@ function ModalEditBinding({binding,onSave,onClose}){
     fixed:"Фиксированное количество, не зависит от размеров",
     per_sqm:"На 1 м² площади стены: кол-во × (H×W). Пример: клеймер 6шт/м², стена 2.5×3м=7.5м² → 45шт",
     per_perim:"На 1 п.м. периметра стены: кол-во × 2(H+W). Пример: уголок, плинтус",
-    step:"Обрешётка с заданным шагом (мм). Рейки перпендикулярно отделке. Введите шаг в мм, напр. 500"
+    step:"Обрешётка с заданным шагом (мм). Рейки перпендикулярно отделке. Введите шаг в мм, напр. 500",
+    area_sheet:"Площадной: площадь стены ÷ площадь материала +10% отходов. Размеры материала берутся из базы"
   };
   const modeInputLabel={
     perim:"Кол-во на 1 п.м. периметра",width:"Кол-во на 1 п.м. ширины",width_top:"Кол-во на 1 п.м. ширины (верх)",
     height:"Кол-во на 1 п.м. высоты",fixed:"Количество (штук)",per_sqm:"Кол-во на 1 м²",
-    per_perim:"Кол-во на 1 п.м. периметра",step:"Шаг обрешётки (мм)"
+    step:"Шаг обрешётки (мм)",area_sheet:"Количество (обычно 1)"
   };
-  const modePlaceholder={perim:"2",width:"1",width_top:"1",height:"1",fixed:"1",per_sqm:"6",per_perim:"1",step:"500"};
+  const modePlaceholder={perim:"2",width:"1",width_top:"1",height:"1",fixed:"1",per_sqm:"6",step:"500",area_sheet:"1"};
   return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="modal-box">
       <div className="modal-title">✏️ Редактирование привязки</div>
@@ -493,7 +500,7 @@ function ModalEditBinding({binding,onSave,onClose}){
         {binding.materials?.name||"?"}
       </div>
       <div className="m-field"><div className="m-label">Режим расчёта</div>
-        <select className="m-inp" value={cm} onChange={e=>{const v=e.target.value;setCm(v);setQty(v==="step"?500:v==="per_sqm"?6:v==="fixed"?1:1)}}>
+        <select className="m-inp" value={cm} onChange={e=>{const v=e.target.value;setCm(v);setQty(v==="step"?500:v==="per_sqm"?6:v==="area_sheet"?1:v==="fixed"?1:1)}}>
           <option value="fixed">🔢 Фиксированное кол-во</option>
           <option value="perim">📐 По периметру (весь P)</option>
           <option value="width">↔ По ширине (низ)</option>
@@ -501,12 +508,13 @@ function ModalEditBinding({binding,onSave,onClose}){
           <option value="height">↕ По высоте (бок × 2)</option>
           <option value="per_sqm">📐 На 1 м² площади</option>
           <option value="step">📊 Обрешётка (шаг мм)</option>
+          <option value="area_sheet">📐 Площадной (м² стены ÷ м² материала +10%)</option>
         </select>
       </div>
       <div className="m-row">
         <div className="m-field" style={{flex:1}}>
           <div className="m-label">{modeInputLabel[cm]||"Количество"}</div>
-          <input type="number" className="m-inp" value={qty||""} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step={cm==="step"?"10":"0.1"} placeholder={modePlaceholder[cm]||"0"} autoFocus/>
+          <input type="number" className="m-inp" value={qty===0||qty===""?"":qty} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step={cm==="step"?"10":"0.1"} placeholder={modePlaceholder[cm]||"0"} autoFocus/>
         </div>
         <div className="m-field" style={{flex:1}}><div className="m-label">Видимость</div>
           <select className="m-inp" value={vis?"open":"hidden"} onChange={e=>setVis(e.target.value==="open")}>
@@ -560,7 +568,7 @@ function ModalAddBinding({title,materials,onSave,onClose}){
         ✓ {selectedMat.name} {selectedMat.price?`— ${selectedMat.price}₽`:""}/{selectedMat.unit}
       </div>}
       <div className="m-field"><div className="m-label">Режим расчёта</div>
-        <select className="m-inp" value={cm} onChange={e=>{const v=e.target.value;setCm(v);setQty(v==="step"?500:v==="per_sqm"?6:v==="fixed"?1:1)}}>
+        <select className="m-inp" value={cm} onChange={e=>{const v=e.target.value;setCm(v);setQty(v==="step"?500:v==="per_sqm"?6:v==="area_sheet"?1:v==="fixed"?1:1)}}>
           <option value="fixed">🔢 Фиксированное кол-во</option>
           <option value="perim">📐 По периметру (весь P)</option>
           <option value="width">↔ По ширине (низ)</option>
@@ -568,11 +576,12 @@ function ModalAddBinding({title,materials,onSave,onClose}){
           <option value="height">↕ По высоте (бок × 2)</option>
           <option value="per_sqm">📐 На 1 м² площади</option>
           <option value="step">📊 Обрешётка (шаг мм)</option>
+          <option value="area_sheet">📐 Площадной (м² стены ÷ м² материала +10%)</option>
         </select>
       </div>
       <div className="m-row">
         <div className="m-field" style={{flex:1}}>
-          <div className="m-label">{({fixed:"Количество (штук)",perim:"Кол-во на 1 п.м. периметра",width:"Кол-во на 1 п.м. ширины (низ)",width_top:"Кол-во на 1 п.м. ширины (верх)",height:"Кол-во на 1 п.м. высоты",per_sqm:"Кол-во на 1 м²",step:"Шаг обрешётки (мм)"})[cm]||"Количество"}</div>
+          <div className="m-label">{({fixed:"Количество (штук)",perim:"Кол-во на 1 п.м. периметра",width:"Кол-во на 1 п.м. ширины (низ)",width_top:"Кол-во на 1 п.м. ширины (верх)",height:"Кол-во на 1 п.м. высоты",per_sqm:"Кол-во на 1 м²",step:"Шаг обрешётки (мм)",area_sheet:"Количество (обычно 1)"})[cm]||"Количество"}</div>
           <input type="number" className="m-inp" value={qty} onChange={e=>setQty(Number(e.target.value)||0)} min="0" step={cm==="step"?"10":"0.1"} placeholder={({perim:"2",width:"1",width_top:"1",height:"1",fixed:"1",per_sqm:"6",step:"500"})[cm]||"0"}/>
         </div>
         <div className="m-field" style={{flex:1}}><div className="m-label">Видимость</div>
@@ -589,6 +598,7 @@ function ModalAddBinding({title,materials,onSave,onClose}){
         {cm==="width_top"&&<>↔ Кол-во × ширина (верх). <b>Введите сколько на 1 п.м.</b> Козырёк, верхняя планка</>}
         {cm==="height"&&<>↕ Кол-во × высота × 2 стороны. <b>Введите сколько на 1 п.м.</b></>}
         {cm==="per_sqm"&&<>📐 Кол-во × площадь стены (H×W). <b>Введите сколько на 1 м².</b> Клеймер, подложка</>}
+        {cm==="area_sheet"&&<>📐 Площадь стены ÷ площадь материала +10%. Размеры берутся из поля «Размеры» материала. <b>Кол-во = 1</b></>}
         {cm==="step"&&<>📊 Обрешётка: рейки перпенд. отделке. <b>Введите шаг в мм</b> (напр. 500)</>}
       </div>
       <div style={{display:"flex",gap:8,marginTop:12}}>
@@ -738,7 +748,7 @@ function DynTab({tabId,db,sel,setSel}){
     const hM=hMm/1000, wM=wMm/1000;
     const perimM=hM>0&&wM>0?2*(hM+wM):0;
     const areaSqm=hM*wM;
-    const cmLabels={perim:"📐периметр",width:"↔низ",width_top:"↔верх",height:"↕бок×2",fixed:"🔢фикс.",per_sqm:"📐м²",step:"📊шаг"};
+    const cmLabels={perim:"📐периметр",width:"↔низ",width_top:"↔верх",height:"↕бок×2",fixed:"🔢фикс.",per_sqm:"📐м²",step:"📊шаг",area_sheet:"📐лист"};
 
     // Перевод п.м. в штуки (для длиномеров)
     const pmToSht=(pm,mat)=>{
@@ -780,6 +790,12 @@ function DynTab({tabId,db,sel,setSel}){
         const sht=pmToSht(totalM,mat);
         return{qty:sht,hint:"шаг "+stepMm+"мм → "+strips+"полос × "+(stripLen/1000).toFixed(1)+"м = "+totalM.toFixed(1)+"п.м. → "+sht+"шт."};
       }
+      if(mode==="area_sheet"){
+        const md=parseDims(mat?.dimensions);
+        const matAreaSqm=md.d*md.s/1e6;
+        if(matAreaSqm>0&&areaSqm>0){const q=Math.ceil(areaSqm/matAreaSqm*1.1*baseQty);return{qty:q,hint:areaSqm.toFixed(2)+"м² ÷ "+matAreaSqm.toFixed(3)+"м² ×1.1 = "+q+"шт."}}
+        return{qty:baseQty,hint:"⚠️ нет размеров"};
+      }
       // perim
       const pm=baseQty*perimM;
       const sht=pmToSht(pm,mat);
@@ -801,7 +817,7 @@ function DynTab({tabId,db,sel,setSel}){
         <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap",fontSize:isHidden?12:13}}>
           <span style={{flex:1,color:"var(--text-muted)",minWidth:80}}>{om.materials?.name}</span>
           {modeTag&&<span style={{fontSize:9,color:"var(--text-dim)",padding:"1px 4px",borderRadius:6,background:isHidden?"var(--bg)":"var(--card)"}}>{modeTag}</span>}
-          <input type="number" min="0" value={qty||""} onChange={e=>setQty(cat.id,om.material_id,Number(e.target.value)||0)}
+          <input type="number" min="0" value={qty===0||qty===""?"":qty} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
             style={{width:isHidden?55:70,padding:isHidden?"2px 5px":"5px 8px",background:isHidden?"var(--bg)":"var(--card)",border:"1px solid var(--border)",borderRadius:isHidden?6:8,color:"var(--text)",fontFamily:"var(--mono)",fontSize:isHidden?11:13,outline:"none",textAlign:"right"}}/>
           <span style={{fontSize:10,color:"var(--text-dim)"}}>шт.</span>
           {om.materials?.price>0&&qty>0&&<span className="cost-tag" style={{fontSize:11}}>={((om.materials?.price||0)*qty).toLocaleString("ru")}₽</span>}
@@ -973,7 +989,7 @@ function DynTab({tabId,db,sel,setSel}){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <span style={{fontSize:13,fontWeight:600,color:"var(--accent)",flex:1}}>{om.materials?.name}</span>
               <div style={{display:"flex",alignItems:"center",gap:4}}>
-                <input type="number" min="0" value={autoQty} onChange={e=>setQty(cat.id,om.material_id,Number(e.target.value)||0)}
+                <input type="number" min="0" value={autoQty} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
                   style={{width:70,padding:"4px 8px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"var(--mono)",fontSize:14,fontWeight:700,outline:"none",textAlign:"right"}}/>
                 <span style={{fontSize:12,color:"var(--text-dim)"}}>шт.</span>
                 <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:13,padding:"2px 6px"}}>✕</button>
@@ -1017,32 +1033,81 @@ function DynTab({tabId,db,sel,setSel}){
           return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",background:"var(--bg)",borderRadius:10,marginBottom:4,flexWrap:"wrap"}}>
             <span style={{flex:1,fontSize:13,color:"var(--text-muted)",minWidth:120}}>{om.materials?.name}</span>
             {om.materials?.price>0&&<span className="price-tag">{om.materials.price}₽/{om.materials.unit}</span>}
-            <input type="number" min="0" value={getQty(cat.id,om.material_id,om.quantity)||""} onChange={e=>setQty(cat.id,om.material_id,Number(e.target.value)||0)}
+            <input type="number" min="0" value={getQty(cat.id,om.material_id,om.quantity)||""} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
               style={{width:80,padding:"6px 10px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"var(--mono)",fontSize:13,outline:"none",textAlign:"right"}}/>
             <span style={{fontSize:11,color:"var(--text-dim)"}}>{om.materials?.unit}</span>
             <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:12,padding:"0 4px"}}>✕</button>
           </div>);
         })}
 
-        {/* Скрытые (авто) — стандартные */}
-        {!isFrame&&!isBB&&!isWin&&!isSidingCat&&hiddenMats.length>0&&<details style={{marginTop:4}}>
-          <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600,padding:"4px 0"}}>🔒 Авто ({hiddenMats.filter(om=>!isRemoved(cat.id,om.id)).length}/{hiddenMats.length})</summary>
-          {hiddenMats.map(om=>{
-            if(isRemoved(cat.id,om.id))return(<div key={om.id} style={{display:"flex",justifyContent:"space-between",padding:"3px 10px",fontSize:12,color:"var(--text-dim)",borderRadius:6,background:"var(--card)",marginBottom:2,opacity:.5}}>
-              <span style={{textDecoration:"line-through"}}>{om.materials?.name}</span>
-              <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:10}}>↩</button>
-            </div>);
-            return(<div key={om.id} style={{display:"flex",alignItems:"center",padding:"3px 10px",fontSize:12,color:"var(--text-muted)",borderRadius:6,background:"var(--card)",marginBottom:2,gap:4,flexWrap:"wrap"}}>
-              <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
-              <input type="number" min="0" value={getQty(cat.id,om.material_id,om.quantity)} onChange={e=>setQty(cat.id,om.material_id,Number(e.target.value)||0)}
-                style={{width:55,padding:"2px 5px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none",textAlign:"right"}}/>
-              <span style={{fontSize:10,color:"var(--text-dim)"}}>{om.materials?.unit}</span>
-              {om.materials?.price>0&&<span className="price-tag" style={{fontSize:11}}>{om.materials.price}₽</span>}
-              <span className="cost-tag" style={{fontSize:11}}>={((om.materials?.price||0)*(getQty(cat.id,om.material_id,om.quantity))).toLocaleString("ru")}₽</span>
-              <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:11,padding:"0 4px"}}>✕</button>
-            </div>);
-          })}
-        </details>}
+        {/* Скрытые (авто) — стандартные, с calc_mode */}
+        {!isFrame&&!isBB&&!isWin&&!isSidingCat&&hiddenMats.length>0&&(()=>{
+          const hMm=dims.height||0, wMm=dims.length||0;
+          const hM=hMm/1000, wM=wMm/1000;
+          const perimM=hM>0&&wM>0?2*(hM+wM):0;
+          const areaSqm=hM*wM;
+          const toSht=(pm,mat)=>{
+            if(pm<=0)return 0;
+            const md=parseDims(mat?.dimensions);
+            if(md.d>0)return Math.ceil(pm/(md.d/1000));
+            return Math.ceil(pm);
+          };
+          const matLen=(mat)=>{const md=parseDims(mat?.dimensions);return md.d>0?(md.d/1000):0};
+          const calcHidden=(base,mode,mat)=>{
+            if(!base||base<=0)return{qty:0,hint:""};
+            const ml=matLen(mat);
+            const lenInfo=ml>0?" ÷ "+ml+"м":"";
+            if(mode==="fixed")return{qty:base,hint:base+" шт. (фикс.)"};
+            if(mode==="width"||mode==="width_top"){const pm=base*wM;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × "+wM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."}}
+            if(mode==="height"){const pm=base*hM*2;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × "+hM.toFixed(1)+"м × 2 = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."+(ml<=0?" ⚠️ нет размеров материала!":"")}}
+            if(mode==="per_sqm"){const q=Math.ceil(base*areaSqm);return{qty:q,hint:base+"/м² × "+areaSqm.toFixed(2)+"м² = "+q+"шт."}}
+            if(mode==="step"&&hMm>0&&wMm>0){
+              const stepMm=base;
+              let strips,stripLen;
+              if(dir==="vertical"){strips=Math.floor(wMm/stepMm)+1;stripLen=hMm}
+              else{strips=Math.floor(hMm/stepMm)+1;stripLen=wMm}
+              const totalM=strips*stripLen/1000;
+              const s=toSht(totalM,mat);
+              return{qty:s,hint:"шаг "+stepMm+"мм → "+strips+"пол.×"+(stripLen/1000).toFixed(1)+"м = "+totalM.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."};
+            }
+            if(mode==="perim"){const pm=base*perimM;const s=toSht(pm,mat);return{qty:s,hint:base+"/м × P"+perimM.toFixed(1)+"м = "+pm.toFixed(1)+"п.м."+lenInfo+" → "+s+"шт."}}
+            if(mode==="area_sheet"){
+              const md=parseDims(mat?.dimensions);
+              const matAreaSqm=md.d*md.s/1e6;
+              if(matAreaSqm>0&&areaSqm>0){const q=Math.ceil(areaSqm/matAreaSqm*1.1*base);return{qty:q,hint:areaSqm.toFixed(2)+"м² ÷ "+matAreaSqm.toFixed(3)+"м² ×1.1 = "+q+"шт."}}
+              return{qty:base,hint:"⚠️ нет размеров материала для расчёта площади"};
+            }
+            return{qty:base,hint:""};
+          };
+          return(<details style={{marginTop:4}}>
+            <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600,padding:"4px 0"}}>🔒 Авто ({hiddenMats.filter(om=>!isRemoved(cat.id,om.id)).length}/{hiddenMats.length})</summary>
+            {hiddenMats.map(om=>{
+              if(isRemoved(cat.id,om.id))return(<div key={om.id} style={{display:"flex",justifyContent:"space-between",padding:"3px 10px",fontSize:12,color:"var(--text-dim)",borderRadius:6,background:"var(--card)",marginBottom:2,opacity:.5}}>
+                <span style={{textDecoration:"line-through"}}>{om.materials?.name}</span>
+                <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:10}}>↩</button>
+              </div>);
+              const base=om.quantity||0;
+              const mode=om.calc_mode||"fixed";
+              const res=calcHidden(base,mode,om.materials);
+              const userQ=getQty(cat.id,om.material_id,undefined);
+              const qty=userQ!==undefined?userQ:res.qty;
+              const cmTag={perim:"📐P",width:"↔низ",width_top:"↔верх",height:"↕бок",fixed:"🔢",per_sqm:"📐м²",step:"📊"}[mode]||"";
+              return(<div key={om.id} style={{background:"var(--card)",borderRadius:6,padding:"4px 10px",marginBottom:2}}>
+                <div style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"var(--text-muted)",flexWrap:"wrap"}}>
+                  <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
+                  {cmTag&&<span style={{fontSize:9,color:"var(--text-dim)",padding:"1px 4px",borderRadius:6,background:"var(--bg)"}}>{cmTag}</span>}
+                  <input type="number" min="0" value={qty===0||qty===""?"":qty} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                    style={{width:55,padding:"2px 5px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none",textAlign:"right"}}/>
+                  <span style={{fontSize:10,color:"var(--text-dim)"}}>{om.materials?.unit}</span>
+                  {om.materials?.price>0&&<span className="price-tag" style={{fontSize:11}}>{om.materials.price}₽</span>}
+                  {om.materials?.price>0&&qty>0&&<span className="cost-tag" style={{fontSize:11}}>={((om.materials?.price||0)*qty).toLocaleString("ru")}₽</span>}
+                  <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:11,padding:"0 4px"}}>✕</button>
+                </div>
+                {res.hint&&<div style={{fontSize:9,color:"var(--accent)",padding:"1px 4px"}}>{res.hint}</div>}
+              </div>);
+            })}
+          </details>);
+        })()}
       </div>);
     })}
 
@@ -1152,6 +1217,12 @@ function doCalc(sel,db){
           else{strips=Math.floor(hMm/stepMm)+1;stripLen=wMm}
           return toSht(strips*stripLen/1000);
         }
+        if(mode==="area_sheet"){
+          const md=parseDims(mat?.dimensions);
+          const matA=md.d*md.s/1e6;
+          if(matA>0)return Math.ceil(hM*wM/matA*1.1*baseQty);
+          return baseQty;
+        }
         // perim
         return toSht(baseQty*perimM);
       };
@@ -1242,15 +1313,48 @@ function doCalc(sel,db){
 
       // Отделка поверхностей
       if(isSurface&&cat.name==="Вид отделки"&&areaSqm>0){
+        // Вспомогательная функция для скрытых по calc_mode
+        const toShtCalc=(pm,mat)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+        let effH=heightMm,effW=widthMm;
+        if(hasWindow&&rawAreaSqm>0){effW=Math.round(widthMm*(areaSqm/rawAreaSqm))}
+        const effHM=effH/1000,effWM=effW/1000;
+        const effPerimM=effHM>0&&effWM>0?2*(effHM+effWM):0;
+        const effArea=effHM*effWM;
+        
         mats.forEach(om=>{
           const mat=om.materials;if(!mat)return;
           if(ts["_rm_"+cat.id+"_"+om.id])return;
-          let effH=heightMm,effW=widthMm;
-          if(hasWindow&&rawAreaSqm>0){effW=Math.round(widthMm*(areaSqm/rawAreaSqm))}
-          const defQty=calcMatQty(effH,effW,mat.dimensions,direction,mat.is_linear);
-          const uq=ts["_q_"+cat.id+"_"+om.material_id];
-          let qty=uq!==undefined?uq:defQty;
-          if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+          
+          if(om.visible){
+            // Чистовой: считаем как раньше через calcMatQty
+            const defQty=calcMatQty(effH,effW,mat.dimensions,direction,mat.is_linear);
+            const uq=ts["_q_"+cat.id+"_"+om.material_id];
+            let qty=uq!==undefined?uq:defQty;
+            if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:false});
+          }else{
+            // Скрытый: считаем по calc_mode
+            const base=om.quantity||0;
+            const mode=om.calc_mode||"fixed";
+            let autoQty=base;
+            if(mode==="perim"&&effPerimM>0)autoQty=toShtCalc(base*effPerimM,mat);
+            else if((mode==="width"||mode==="width_top")&&effWM>0)autoQty=toShtCalc(base*effWM,mat);
+            else if(mode==="height"&&effHM>0)autoQty=toShtCalc(base*effHM*2,mat);
+            else if(mode==="per_sqm"&&effArea>0)autoQty=Math.ceil(base*effArea);
+            else if(mode==="step"&&effH>0&&effW>0){
+              let strips,stripLen;
+              if(direction==="vertical"){strips=Math.floor(effW/base)+1;stripLen=effH}
+              else{strips=Math.floor(effH/base)+1;stripLen=effW}
+              autoQty=toShtCalc(strips*stripLen/1000,mat);
+            }
+            else if(mode==="area_sheet"&&effArea>0){
+              const md=parseDims(mat.dimensions);
+              const matA=md.d*md.s/1e6;
+              if(matA>0)autoQty=Math.ceil(effArea/matA*1.1*base);
+            }
+            const uq=ts["_q_"+cat.id+"_"+om.material_id];
+            let qty=uq!==undefined?uq:autoQty;
+            if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:true});
+          }
         });
         return;
       }
@@ -1274,12 +1378,35 @@ function doCalc(sel,db){
         return;
       }
 
-      // Всё остальное
+      // Всё остальное — с поддержкой calc_mode
       mats.forEach(om=>{
         const mat=om.materials;if(!mat)return;
         if(ts["_rm_"+cat.id+"_"+om.id])return;
+        const base=om.quantity||0;
+        const mode=om.calc_mode||"fixed";
+        // Расчёт по режиму (для стен используем размеры стены)
+        const toSht=(pm)=>{if(pm<=0)return 0;const md=parseDims(mat.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+        const hMm=heightMm,wMm=widthMm,hM=hMm/1000,wM=wMm/1000;
+        const perimM=hM>0&&wM>0?2*(hM+wM):0;
+        let autoQty=base;
+        if(mode==="perim"&&perimM>0)autoQty=toSht(base*perimM);
+        else if((mode==="width"||mode==="width_top")&&wM>0)autoQty=toSht(base*wM);
+        else if(mode==="height"&&hM>0)autoQty=toSht(base*hM*2);
+        else if(mode==="per_sqm"&&areaSqm>0)autoQty=Math.ceil(base*areaSqm);
+        else if(mode==="step"&&hMm>0&&wMm>0){
+          const dir=direction;
+          let strips,stripLen;
+          if(dir==="vertical"){strips=Math.floor(wMm/base)+1;stripLen=hMm}
+          else{strips=Math.floor(hMm/base)+1;stripLen=wMm}
+          autoQty=toSht(strips*stripLen/1000);
+        }
+        else if(mode==="area_sheet"&&areaSqm>0){
+          const md=parseDims(mat.dimensions);
+          const matA=md.d*md.s/1e6;
+          if(matA>0)autoQty=Math.ceil(areaSqm/matA*1.1*base);
+        }
         const uq=ts["_q_"+cat.id+"_"+om.material_id];
-        let qty=uq!==undefined?uq:(om.quantity||0);
+        let qty=uq!==undefined?uq:autoQty;
         if(qty<=0)return;
         items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
       });
@@ -1583,8 +1710,13 @@ function SkladSection({notify,db}){
 
   const saveItem=async(data,editId)=>{
     try{
-      const clean={item_id:data.item_id,name:data.name,type:data.type,unit:data.unit,min_stock:data.min_stock,buy_price:data.buy_price};
+      const clean={item_id:data.name.trim(),name:data.name.trim(),type:data.type,unit:data.unit,min_stock:data.min_stock,buy_price:data.buy_price};
       if(editId){
+        // Обновляем item_id в движениях если название изменилось
+        const oldItem=items.find(i=>i.id===editId);
+        if(oldItem&&oldItem.item_id!==clean.item_id){
+          await sb.from("sklad_moves").update({item_id:clean.item_id}).eq("item_id",oldItem.item_id);
+        }
         await sb.from("sklad_items").update(clean).eq("id",editId);
       }else{
         const{error}=await sb.from("sklad_items").insert(clean);
@@ -1823,7 +1955,7 @@ function SkladItemModal({item,prefillName,prefillUnit,prefillPrice,onSave,onClos
   return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="modal-box">
       <div className="modal-title">{item?"✏️ Редактирование":"🏪 Добавить на склад"}</div>
-      <div className="m-field"><div className="m-label">Название</div><input className="m-inp" value={f.name} onChange={e=>setF({...f,name:e.target.value,item_id:item?f.item_id:e.target.value})} autoFocus/></div>
+      <div className="m-field"><div className="m-label">Название</div><input className="m-inp" value={f.name} onChange={e=>setF({...f,name:e.target.value})} autoFocus/></div>
       <div className="m-row">
         <div className="m-field" style={{flex:1}}><div className="m-label">Тип/описание</div><input className="m-inp" value={f.type} onChange={e=>setF({...f,type:e.target.value})} placeholder="лист, рулон..."/></div>
         <div className="m-field" style={{flex:1}}><div className="m-label">Единица</div>
@@ -1881,6 +2013,7 @@ function SkladMoveModal({items,prefill,onSave,onClose}){
 }
 
 function MatEditModal({mat,skladItem,getStock,onUpdateMat,onAddToSklad,onRemoveFromSklad,onClose}){
+  const[name,setName]=useState(mat.name||"");
   const[price,setPrice]=useState(mat.price||0);
   const[color,setColor]=useState(mat.color||"");
   const[dims,setDims]=useState(mat.dimensions||"");
@@ -1891,14 +2024,16 @@ function MatEditModal({mat,skladItem,getStock,onUpdateMat,onAddToSklad,onRemoveF
   const stock=onSklad?getStock(skladItem.item_id):0;
 
   const handleSave=()=>{
-    onUpdateMat(mat.id,{price,color,dimensions:dims,unit,is_linear:isLinear});
+    onUpdateMat(mat.id,{name:name.trim(),price,color,dimensions:dims,unit,is_linear:isLinear});
   };
 
   return(<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="modal-box">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
-        <div>
-          <div className="modal-title" style={{marginBottom:4}}>{mat.name}</div>
+        <div style={{flex:1}}>
+          <div className="m-field" style={{marginBottom:4}}><div className="m-label">Название</div>
+            <input className="m-inp" value={name} onChange={e=>setName(e.target.value)} style={{fontSize:15,fontWeight:700}}/>
+          </div>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
             <span style={{fontSize:12,padding:"2px 8px",borderRadius:10,fontWeight:600,
               background:onSklad?"var(--success-soft)":"var(--warning-soft)",
@@ -1970,6 +2105,7 @@ function App(){
   const[sel,setSel]=useState({});
   const[results,setResults]=useState(null);
   const[orderInfo,setOI]=useState({order_number:"",address:"",phone:""});
+  const[collapseKey,setCollapseKey]=useState(0);
 
   const notify=useCallback((msg,type="ok")=>setNotif({msg,type}),[]);
   const refresh=useCallback(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}},[]);
@@ -2002,6 +2138,7 @@ function App(){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
           <div><div style={{fontSize:11,color:"var(--accent)",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:2}}>Калькулятор</div><div style={{fontSize:18,fontWeight:700}}>Расчёт материалов для балконов</div></div>
           <div style={{display:"flex",gap:6,flexShrink:0}}>
+            {!showSum&&<button onClick={()=>setCollapseKey(k=>k+1)} style={{padding:"8px 14px",borderRadius:10,background:"var(--card)",color:"var(--text-muted)",border:"1px solid var(--border)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>↑ Свернуть</button>}
             {showSum&&<button onClick={()=>setShowSum(false)} style={{padding:"8px 14px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>← Назад</button>}
             {!showSum&&<button onClick={handleCalc} style={{padding:"8px 14px",borderRadius:10,background:"var(--success-soft)",color:"var(--success)",border:"1px solid var(--success)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer"}}>Итого</button>}
           </div>
@@ -2034,13 +2171,13 @@ function App(){
       :<>
         {/* TAB SECTIONS */}
         {TABS.map(tab=>(
-          <Sec key={tab.id} title={tab.label} icon={tab.icon}>
+          <Sec key={tab.id} title={tab.label} icon={tab.icon} collapseKey={collapseKey}>
             <DynTab tabId={tab.id} db={db} sel={sel} setSel={setSel}/>
           </Sec>
         ))}
 
         {/* ЗАКАЗЫ */}
-        <Sec title="Заказы" icon="📋">
+        <Sec title="Заказы" icon="📋" collapseKey={collapseKey}>
           <OrdersSection notify={notify} onLoadOrder={(o)=>{
             setSel(o.form_data||{});
             setOI({order_number:o.order_number||"",address:o.address||"",phone:o.phone||""});
@@ -2051,14 +2188,14 @@ function App(){
         </Sec>
 
         {/* СПРАВОЧНИК */}
-        <Sec title="Справочник" icon="📖">
+        <Sec title="Справочник" icon="📖" collapseKey={collapseKey}>
           <TreeRef db={db} refresh={refresh} notify={notify}/>
         </Sec>
 
         {/* ШАБЛОНЫ ЧЕРНОВЫХ */}
 
         {/* СКЛАД */}
-        <Sec title="Склад" icon="📦">
+        <Sec title="Склад" icon="📦" collapseKey={collapseKey}>
           <SkladSection notify={notify} db={db}/>
         </Sec>
       </>}
