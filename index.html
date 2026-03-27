@@ -76,7 +76,7 @@ const TABS=[
   {id:"arrival",label:"На заезд",icon:"🚛"},
   {id:"glazing",label:"Остекление",icon:"🪟"},
   {id:"main_wall",label:"Главная стена",icon:"🧱"},
-  {id:"facade_wall",label:"Фасадная стена",icon:"🏗"},
+  {id:"facade_wall",label:"Фасадная стена",icon:"🏢"},
   {id:"bl_wall",label:"БЛ стена",icon:"◧"},
   {id:"bp_wall",label:"БП стена",icon:"◨"},
   {id:"ceiling",label:"Потолок",icon:"⬆"},
@@ -410,7 +410,11 @@ function TreeRef({db,refresh,notify}){
         </div>
 
         {isOpen(tKey)&&<div className="tree-lvl">
-          {cats.map(cat=>{
+          {cats.filter(cat=>{
+            // В остеклении скрываем "Материалы для установки" как отдельные категории
+            if(tab.id==="glazing"){const cn=cat.name.toLowerCase();if(cn.includes("материалы для установки")||cn.includes("материалы установки"))return false}
+            return true;
+          }).map(cat=>{
             const cKey=`cat_${cat.id}`;
             const opts=catOpts[cat.id]||[];
             return(<div key={cat.id} className="tree-node">
@@ -430,9 +434,9 @@ function TreeRef({db,refresh,notify}){
                   const mats=optMats[opt.id]||[];
                   const hiddenCount=mats.filter(m=>!m.visible).length;
                   const openCount=mats.filter(m=>m.visible).length;
-                  // Скрыть кнопку привязки для «Что делаем» и «Основная Рама» (только добавление вариантов)
+                  // Скрыть кнопку привязки только для «Что делаем»
                   const catLow=cat.name.toLowerCase();
-                  const noBinding=tab.id==="glazing"&&(catLow.includes("что дел")||catLow==="вариант"||(catLow.includes("рама")&&!catLow.includes("материалы")));
+                  const noBinding=tab.id==="glazing"&&(catLow.includes("что дел")||catLow==="вариант");
                   const isInstallCat=catLow.includes("материалы для установки")||catLow.includes("материалы установки");
                   return(<div key={opt.id} className="tree-node">
                     <div className="tree-toggle" onClick={()=>tog(oKey)}>
@@ -452,8 +456,6 @@ function TreeRef({db,refresh,notify}){
                     {isOpen(oKey)&&<div className="tree-lvl">
                       {mats.length===0&&!noBinding&&<div style={{fontSize:12,color:"var(--text-dim)",padding:"4px 10px"}}>Нет материалов</div>}
                       {noBinding&&<div style={{fontSize:11,color:"var(--text-dim)",padding:"4px 10px"}}>ℹ️ Только выбор варианта, материалы не привязываются</div>}
-                      {/* Подсказка для категорий установки */}
-                      {isInstallCat&&mats.length>0&&<div style={{fontSize:10,color:"var(--accent)",padding:"2px 10px",marginBottom:4,background:"var(--accent-soft)",borderRadius:6}}>💡 Кол-во = на 1 п.м. периметра. Погонажный материал (3м доска) пересчитается в штуки</div>}
                       {mats.map(om=>{
                         const mode=om.calc_mode||"fixed";
                         const cmLabel={perim:"📐периметр",width:"↔низ",width_top:"↔верх",height:"↕бок×2",fixed:"🔢фикс.",per_sqm:"📐м²",step:"📊шаг",area_sheet:"📐лист"}[mode]||"";
@@ -705,8 +707,9 @@ function DynTab({tabId,db,sel,setSel}){
   const dir=(sel[tabId]||{})._dir||"vertical";
   const hasWindow=(sel[tabId]||{})._hasWindow||false;
   const needOtkos=(sel[tabId]||{})._needOtkos||false;
-  const WINDOW_W=2000, WINDOW_H=1300;
-  const windowArea=(WINDOW_W/1000)*(WINDOW_H/1000);
+  const bbW=(sel[tabId]||{})._bbW||2000;
+  const bbH=(sel[tabId]||{})._bbH||1300;
+  const windowArea=(bbW/1000)*(bbH/1000);
   const rawArea=isSurface?(dims.length/1000)*(dims.height/1000):0;
   const area=isSurface?(isMainWall&&hasWindow?Math.max(0,rawArea-windowArea):rawArea):0;
 
@@ -938,11 +941,16 @@ function DynTab({tabId,db,sel,setSel}){
         </div>}
       </div>
       {isMainWall&&<div style={{marginBottom:10,background:"var(--bg)",borderRadius:10,padding:10,border:"1px solid var(--border)"}}>
-        <Tog label="🪟 Есть балконный блок (окно 2000×1300)" value={hasWindow} onChange={v=>setExtra("_hasWindow",v)}/>
-        {hasWindow&&<div style={{marginLeft:58}}>
-          <div style={{fontSize:11,color:"var(--text-dim)",marginBottom:6}}>Вычет площади окна: {windowArea} м²</div>
+        <Tog label="🪟 Есть балконный блок" value={hasWindow} onChange={v=>setExtra("_hasWindow",v)}/>
+        {hasWindow&&<div style={{marginLeft:20}}>
+          <div style={{display:"flex",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+            <NI label="Ширина ББ (мм)" value={bbW} onChange={v=>setExtra("_bbW",v)} unit="мм"/>
+            <NI label="Высота ББ (мм)" value={bbH} onChange={v=>setExtra("_bbH",v)} unit="мм"/>
+            <div style={{background:"var(--accent-soft)",color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12,fontWeight:700,padding:"8px 12px",borderRadius:10,alignSelf:"flex-end",marginBottom:8}}>
+              Вычет: {windowArea.toFixed(2)} м²
+            </div>
+          </div>
           <Tog label="Нужны откосы + подоконник" value={needOtkos} onChange={v=>setExtra("_needOtkos",v)}/>
-          {needOtkos&&<div style={{fontSize:11,color:"var(--success)",marginTop:4}}>✓ Откосы и подоконник в расчёте</div>}
         </div>}
       </div>}
       {!isFloor&&!dims.height&&mainH>0&&tabId!=="main_wall"&&<div onClick={()=>setDim("height",mainH)} style={{fontSize:11,color:"var(--accent)",cursor:"pointer",marginBottom:6,padding:"4px 8px",background:"var(--accent-soft)",borderRadius:8,display:"inline-block"}}>💡 Высота как на главной: {mainH} мм</div>}
@@ -974,6 +982,7 @@ function DynTab({tabId,db,sel,setSel}){
       const isBB=isGlazing&&cn.includes("балконн"); // замена балконного блока
       const isWin=isGlazing&&cn.includes("окно");
       const isSidingCat=isGlazing&&cn.includes("сайдинг");
+      const isRoof=isGlazing&&cn.includes("крыш");
 
       // Показываем label категории
       const catLabel=(()=>{
@@ -990,48 +999,161 @@ function DynTab({tabId,db,sel,setSel}){
           {isBalcony?"Балкон → П-образное / Г-образное":isLodzhia?"Лоджия → Прямое":""}
         </div>}
 
-        {/* Основная Рама: размеры + материалы установки */}
-        {isFrame&&frameSelected&&<div>
-          <DimsBlock label="Основная Рама" dimsKey="_glazingDims" perim={glazingPerimM}/>
-          {/* Материалы установки «Основная Рама» — из скрытой категории */}
-          {tabCats.filter(c=>c.name.toLowerCase().includes("материалы для установки")&&c.name.toLowerCase().includes("основная рама")).map(ic=>{
-            const icOpts=db.options.filter(o=>o.category_id===ic.id);
-            // Берём первый вариант (единственный)
-            const icOpt=icOpts[0];
-            if(!icOpt)return null;
-            const icMats=db.optionMaterials.filter(om=>om.option_id===icOpt.id);
-            if(icMats.length===0)return null;
-            return(<div key={ic.id} style={{marginTop:4}}>
-              <InstallMats cat={ic} mats={icMats} dims={glazingDims}/>
-            </div>);
-          })}
-        </div>}
+        {/* ═══ Основная Рама: как отделка — размеры + открытые + скрытые с calc_mode ═══ */}
+        {isFrame&&frameSelected&&(()=>{
+          const gd=glazingDims;
+          const gH=gd.height/1000,gW=gd.length/1000;
+          const gP=gH>0&&gW>0?2*(gH+gW):0;
+          const gA=gH*gW;
+          return(<div>
+            <DimsBlock label="Основная Рама" dimsKey="_glazingDims" perim={glazingPerimM}/>
+            {/* Открытые материалы */}
+            {visibleMats.map(om=>{
+              if(isRemoved(cat.id,om.id))return null;
+              return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",background:"var(--bg)",borderRadius:10,marginBottom:4,flexWrap:"wrap"}}>
+                <span style={{flex:1,fontSize:13,color:"var(--text-muted)",minWidth:120}}>{om.materials?.name}</span>
+                {om.materials?.price>0&&<span className="price-tag">{om.materials.price}₽</span>}
+                <input type="number" min="0" value={getQty(cat.id,om.material_id,om.quantity)||""} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                  style={{width:80,padding:"6px 10px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"var(--mono)",fontSize:13,outline:"none",textAlign:"right"}}/>
+                <span style={{fontSize:11,color:"var(--text-dim)"}}>{om.materials?.unit}</span>
+              </div>);
+            })}
+            {/* Скрытые с calc_mode */}
+            {hiddenMats.length>0&&(()=>{
+              const toSht=(pm,mat)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+              const matLen=(mat)=>{const md=parseDims(mat?.dimensions);return md.d>0?(md.d/1000):0};
+              const calc=(base,mode,mat)=>{
+                if(!base||base<=0||gP<=0)return{qty:0,hint:""};
+                const ml=matLen(mat);const noSz=ml<=0&&mode!=="fixed"&&mode!=="per_sqm"?" ⚠️ укажите размеры!":"";const li=ml>0?" ÷"+ml+"м":"";
+                if(mode==="fixed")return{qty:base,hint:base+" шт."};
+                if(mode==="width"||mode==="width_top"){const pm=base*gW;const s=toSht(pm,mat);return{qty:s,hint:base+"/м×"+gW.toFixed(1)+"м="+pm.toFixed(1)+"п.м."+li+"→"+s+"шт."+noSz}}
+                if(mode==="height"){const pm=base*gH*2;const s=toSht(pm,mat);return{qty:s,hint:base+"/м×"+gH.toFixed(1)+"м×2="+pm.toFixed(1)+"п.м."+li+"→"+s+"шт."+noSz}}
+                if(mode==="per_sqm"){const q=Math.ceil(base*gA);return{qty:q,hint:base+"/м²×"+gA.toFixed(2)+"м²="+q+"шт."}}
+                if(mode==="step"){const stepMm=base;let st,sl;if(dir==="vertical"){st=Math.floor(gd.length/stepMm)+1;sl=gd.height}else{st=Math.floor(gd.height/stepMm)+1;sl=gd.length}const tm=st*sl/1000;const s=toSht(tm,mat);return{qty:s,hint:"шаг"+stepMm+"→"+st+"п×"+(sl/1000).toFixed(1)+"м="+tm.toFixed(1)+"п.м."+li+"→"+s+"шт."+noSz}}
+                if(mode==="area_sheet"){const md=parseDims(mat?.dimensions);const ma=md.d*md.s/1e6;if(ma>0&&gA>0){const q=Math.ceil(gA/ma*1.1*base);return{qty:q,hint:gA.toFixed(2)+"м²÷"+ma.toFixed(3)+"м²×1.1="+q}}return{qty:base,hint:"⚠️ нет размеров"}}
+                const pm=base*gP;const s=toSht(pm,mat);return{qty:s,hint:base+"/м×P"+gP.toFixed(1)+"м="+pm.toFixed(1)+"п.м."+li+"→"+s+"шт."+noSz};
+              };
+              return(<details style={{marginTop:4}} open>
+                <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600}}>🔒 Скрытые ({hiddenMats.length})</summary>
+                {hiddenMats.map(om=>{
+                  if(isRemoved(cat.id,om.id))return null;
+                  const r=calc(om.quantity||0,om.calc_mode||"fixed",om.materials);
+                  const uq=getQty(cat.id,om.material_id,undefined);
+                  const qty=uq!==undefined?uq:r.qty;
+                  return(<div key={om.id} style={{background:"var(--card)",borderRadius:6,padding:"4px 10px",marginBottom:2}}>
+                    <div style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"var(--text-muted)",flexWrap:"wrap"}}>
+                      <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
+                      <input type="number" min="0" value={qty===0?"":qty} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                        style={{width:55,padding:"2px 5px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none",textAlign:"right"}}/>
+                      <span style={{fontSize:10,color:"var(--text-dim)"}}>шт.</span>
+                      <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:11}}>✕</button>
+                    </div>
+                    {r.hint&&<div style={{fontSize:9,color:"var(--accent)",padding:"1px 4px"}}>{r.hint}</div>}
+                  </div>);
+                })}
+              </details>);
+            })()}
+          </div>);
+        })()}
 
-        {/* Замена балконного блока: размеры + материалы установки */}
-        {isBB&&selectedOpt&&selectedOpt.name!=="Нет"&&selectedOpt.name!=="НЕТ"&&<div>
-          <DimsBlock label="Замена балконного блока" dimsKey="_bbDims" perim={bbPerimM}/>
-          {tabCats.filter(c=>c.name.toLowerCase().includes("материалы для установки")&&c.name.toLowerCase().includes("балконн")).map(ic=>{
-            const icOpts=db.options.filter(o=>o.category_id===ic.id);
-            const icOpt=icOpts[0];
-            if(!icOpt)return null;
-            const icMats=db.optionMaterials.filter(om=>om.option_id===icOpt.id);
-            if(icMats.length===0)return null;
-            return(<div key={ic.id}><InstallMats cat={ic} mats={icMats} dims={bbDims}/></div>);
-          })}
-        </div>}
+        {/* ═══ Замена ББ: Дверь (H×W) + Окно (H×W) ═══ */}
+        {isBB&&selectedOpt&&selectedOpt.name!=="Нет"&&selectedOpt.name!=="НЕТ"&&(()=>{
+          const doorH=(sel[tabId]||{})._bbDoorH||2100,doorW=(sel[tabId]||{})._bbDoorW||700;
+          const winH2=(sel[tabId]||{})._bbWinH||1400,winW2=(sel[tabId]||{})._bbWinW||900;
+          const setD=(k,v)=>setSel(p=>({...p,[tabId]:{...p[tabId],[k]:v}}));
+          const doorA=(doorH/1000)*(doorW/1000),winA2=(winH2/1000)*(winW2/1000);
+          const totalA=doorA+winA2;
+          // Периметр: внешний контур = max(doorH,winH) + doorW + winW + abs(doorH-winH) + часть внутренних
+          const maxH=Math.max(doorH,winH2);
+          const totalP=2*(maxH/1000)+(doorW/1000)+(winW2/1000)+Math.abs(doorH-winH2)/1000;
+          return(<div style={{marginTop:8,background:"var(--bg)",borderRadius:10,padding:10,border:"1px solid var(--border)"}}>
+            <div style={{fontSize:12,fontWeight:600,color:"var(--accent)",marginBottom:6}}>📐 Размеры балконного блока</div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:6}}>
+              <div><div style={{fontSize:11,color:"var(--text-dim)",marginBottom:2}}>🚪 Дверь</div>
+                <div style={{display:"flex",gap:6}}><NI label="H мм" value={doorH} onChange={v=>setD("_bbDoorH",v)}/><NI label="W мм" value={doorW} onChange={v=>setD("_bbDoorW",v)}/></div>
+              </div>
+              <div><div style={{fontSize:11,color:"var(--text-dim)",marginBottom:2}}>🪟 Окно</div>
+                <div style={{display:"flex",gap:6}}><NI label="H мм" value={winH2} onChange={v=>setD("_bbWinH",v)}/><NI label="W мм" value={winW2} onChange={v=>setD("_bbWinW",v)}/></div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,fontSize:12,color:"var(--accent)",fontFamily:"var(--mono)"}}>
+              <span>S={totalA.toFixed(2)}м²</span><span>P≈{totalP.toFixed(2)}м</span>
+            </div>
+            {/* Скрытые материалы ББ */}
+            {hiddenMats.length>0&&<details style={{marginTop:6}} open>
+              <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600}}>🔒 Скрытые ({hiddenMats.length})</summary>
+              {hiddenMats.map(om=>{
+                if(isRemoved(cat.id,om.id))return null;
+                const base=om.quantity||0;const mode=om.calc_mode||"fixed";
+                const toSht=(pm,mat)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+                let qty=base;
+                if(mode==="perim")qty=toSht(base*totalP,om.materials);
+                else if(mode==="per_sqm")qty=Math.ceil(base*totalA);
+                const uq=getQty(cat.id,om.material_id,undefined);
+                const q=uq!==undefined?uq:qty;
+                return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 10px",fontSize:12,color:"var(--text-muted)",background:"var(--card)",borderRadius:6,marginBottom:2,flexWrap:"wrap"}}>
+                  <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
+                  <input type="number" min="0" value={q===0?"":q} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                    style={{width:55,padding:"2px 5px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none",textAlign:"right"}}/>
+                  <span style={{fontSize:10,color:"var(--text-dim)"}}>шт.</span>
+                </div>);
+              })}
+            </details>}
+          </div>);
+        })()}
 
-        {/* Окно: размеры + материалы установки */}
-        {isWin&&selectedOpt&&selectedOpt.name!=="Нет"&&selectedOpt.name!=="НЕТ"&&<div>
-          <DimsBlock label="Окно" dimsKey="_winDims" perim={winPerimM}/>
-          {tabCats.filter(c=>c.name.toLowerCase().includes("материалы для установки")&&c.name.toLowerCase().includes("окно")).map(ic=>{
-            const icOpts=db.options.filter(o=>o.category_id===ic.id);
-            const icOpt=icOpts[0];
-            if(!icOpt)return null;
-            const icMats=db.optionMaterials.filter(om=>om.option_id===icOpt.id);
-            if(icMats.length===0)return null;
-            return(<div key={ic.id}><InstallMats cat={ic} mats={icMats} dims={winDims}/></div>);
-          })}
-        </div>}
+        {/* ═══ Окно: массив окон с кнопкой «+ Добавить» ═══ */}
+        {isWin&&selectedOpt&&selectedOpt.name!=="Нет"&&selectedOpt.name!=="НЕТ"&&(()=>{
+          const windows=(sel[tabId]||{})._windows||[{h:1400,w:1200}];
+          const setWindows=(wns)=>setSel(p=>({...p,[tabId]:{...p[tabId],_windows:wns}}));
+          const addWin=()=>setWindows([...windows,{h:1400,w:1200}]);
+          const rmWin=(i)=>setWindows(windows.filter((_,j)=>j!==i));
+          const updWin=(i,k,v)=>{const n=[...windows];n[i]={...n[i],[k]:v};setWindows(n)};
+          // Суммарные значения
+          let totalP=0,totalA=0;
+          windows.forEach(w=>{const hm=w.h/1000,wm=w.w/1000;totalP+=2*(hm+wm);totalA+=hm*wm});
+          return(<div style={{marginTop:8}}>
+            {windows.map((w,i)=>(
+              <div key={i} style={{background:"var(--bg)",borderRadius:10,padding:10,border:"1px solid var(--border)",marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{fontSize:12,fontWeight:600,color:"var(--accent)"}}>🪟 Окно {windows.length>1?(i+1):""}</span>
+                  {windows.length>1&&<button onClick={()=>rmWin(i)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:13}}>✕</button>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <NI label="H мм" value={w.h} onChange={v=>updWin(i,"h",v)}/>
+                  <NI label="W мм" value={w.w} onChange={v=>updWin(i,"w",v)}/>
+                  <div style={{background:"var(--accent-soft)",color:"var(--accent)",fontFamily:"var(--mono)",fontSize:11,padding:"6px 10px",borderRadius:8,alignSelf:"flex-end",marginBottom:8}}>
+                    P={((2*(w.h/1000+w.w/1000))).toFixed(2)}м S={(w.h/1000*w.w/1000).toFixed(2)}м²
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button onClick={addWin} style={{padding:"6px 14px",borderRadius:8,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:12,fontWeight:600,cursor:"pointer",marginBottom:8}}>＋ Добавить окно</button>
+            {windows.length>0&&<div style={{fontSize:11,color:"var(--accent)",fontFamily:"var(--mono)",marginBottom:4}}>Итого: P={totalP.toFixed(2)}м S={totalA.toFixed(2)}м² ({windows.length} шт.)</div>}
+            {/* Скрытые для окон — считаются по суммарному периметру/площади */}
+            {hiddenMats.length>0&&<details open>
+              <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600}}>🔒 Скрытые ({hiddenMats.length})</summary>
+              {hiddenMats.map(om=>{
+                if(isRemoved(cat.id,om.id))return null;
+                const base=om.quantity||0;const mode=om.calc_mode||"fixed";
+                const toSht=(pm,mat)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+                let qty=base;
+                if(mode==="perim")qty=toSht(base*totalP,om.materials);
+                else if(mode==="per_sqm")qty=Math.ceil(base*totalA);
+                else if(mode==="width"||mode==="width_top"){let tw=0;windows.forEach(w=>tw+=w.w/1000);qty=toSht(base*tw,om.materials)}
+                else if(mode==="height"){let th=0;windows.forEach(w=>th+=w.h/1000*2);qty=toSht(base*th,om.materials)}
+                const uq=getQty(cat.id,om.material_id,undefined);
+                const q=uq!==undefined?uq:qty;
+                return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 10px",fontSize:12,color:"var(--text-muted)",background:"var(--card)",borderRadius:6,marginBottom:2,flexWrap:"wrap"}}>
+                  <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
+                  <input type="number" min="0" value={q===0?"":q} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                    style={{width:55,padding:"2px 5px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none",textAlign:"right"}}/>
+                  <span style={{fontSize:10,color:"var(--text-dim)"}}>шт.</span>
+                </div>);
+              })}
+            </details>}
+          </div>);
+        })()}
 
         {/* Сайдинг: если выбран чистовой — окно размеров + черновые из шаблонов */}
         {isSidingCat&&needSiding&&<div>
@@ -1059,6 +1181,65 @@ function DynTab({tabId,db,sel,setSel}){
             })}
           </div>
         </div>}
+
+        {/* ═══ Крыша: размеры + открытые + скрытые ═══ */}
+        {isRoof&&selectedOpt&&selectedOpt.name!=="Нет"&&selectedOpt.name!=="НЕТ"&&(()=>{
+          const rd=(sel[tabId]||{})._roofDims||{height:0,length:0};
+          const setRD=(k,v)=>setSel(p=>({...p,[tabId]:{...p[tabId],_roofDims:{...rd,[k]:v}}}));
+          const rH=rd.height/1000,rW=rd.length/1000;
+          const rA=rH*rW;const rP=rH>0&&rW>0?2*(rH+rW):0;
+          return(<div style={{marginTop:8}}>
+            <div style={{background:"var(--bg)",borderRadius:10,padding:10,border:"1px solid var(--border)",marginBottom:8}}>
+              <div style={{fontSize:12,fontWeight:600,color:"var(--accent)",marginBottom:6}}>📐 Размеры крыши</div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                <NI label="Длина (мм)" value={rd.length} onChange={v=>setRD("length",v)}/>
+                <NI label="Ширина (мм)" value={rd.height} onChange={v=>setRD("height",v)}/>
+                {rA>0&&<div style={{background:"var(--accent-soft)",color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12,padding:"8px 12px",borderRadius:10,alignSelf:"flex-end",marginBottom:8}}>
+                  S={rA.toFixed(2)}м² P={rP.toFixed(2)}м
+                </div>}
+              </div>
+            </div>
+            {/* Открытые */}
+            {visibleMats.map(om=>{
+              if(isRemoved(cat.id,om.id))return null;
+              const autoQty=rA>0?calcMatQty(rd.height,rd.length,om.materials?.dimensions,"horizontal",om.materials?.is_linear):0;
+              const uq=getQty(cat.id,om.material_id,undefined);
+              const qty=uq!==undefined?uq:autoQty;
+              return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",background:"var(--bg)",borderRadius:10,marginBottom:4,flexWrap:"wrap"}}>
+                <span style={{flex:1,fontSize:13,color:"var(--accent)",fontWeight:600}}>{om.materials?.name}</span>
+                <input type="number" min="0" value={qty===0?"":qty} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                  style={{width:70,padding:"5px 8px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"var(--mono)",fontSize:13,outline:"none",textAlign:"right"}}/>
+                <span style={{fontSize:11,color:"var(--text-dim)"}}>шт.</span>
+              </div>);
+            })}
+            {/* Скрытые */}
+            {hiddenMats.length>0&&rA>0&&(()=>{
+              const toSht=(pm,mat)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+              return(<details open>
+                <summary style={{fontSize:12,color:"var(--warning)",cursor:"pointer",fontWeight:600}}>🔒 Скрытые ({hiddenMats.length})</summary>
+                {hiddenMats.map(om=>{
+                  if(isRemoved(cat.id,om.id))return null;
+                  const base=om.quantity||0;const mode=om.calc_mode||"fixed";
+                  let qty=base;
+                  if(mode==="perim")qty=toSht(base*rP,om.materials);
+                  else if(mode==="per_sqm")qty=Math.ceil(base*rA);
+                  else if(mode==="width")qty=toSht(base*rW,om.materials);
+                  else if(mode==="height")qty=toSht(base*rH,om.materials);
+                  else if(mode==="step"){let st=Math.floor(rd.length/base)+1;let sl=rd.height;qty=toSht(st*sl/1000,om.materials)}
+                  else if(mode==="area_sheet"){const md=parseDims(om.materials?.dimensions);const ma=md.d*md.s/1e6;if(ma>0)qty=Math.ceil(rA/ma*1.1*base)}
+                  const uq=getQty(cat.id,om.material_id,undefined);
+                  const q=uq!==undefined?uq:qty;
+                  return(<div key={om.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 10px",fontSize:12,color:"var(--text-muted)",background:"var(--card)",borderRadius:6,marginBottom:2,flexWrap:"wrap"}}>
+                    <span style={{flex:1,minWidth:80}}>{om.materials?.name}</span>
+                    <input type="number" min="0" value={q===0?"":q} onChange={e=>setQty(cat.id,om.material_id,e.target.value===""?0:Number(e.target.value))}
+                      style={{width:55,padding:"2px 5px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none",textAlign:"right"}}/>
+                    <span style={{fontSize:10,color:"var(--text-dim)"}}>шт.</span>
+                  </div>);
+                })}
+              </details>);
+            })()}
+          </div>);
+        })()}
 
         {/* ── Поверхности: отделка ── */}
         {isFinish&&selectedOpt&&selectedOpt.name!=="Нет"&&area>0&&visibleMats.map(om=>{
@@ -1104,14 +1285,16 @@ function DynTab({tabId,db,sel,setSel}){
 
         {/* Покраска */}
         {isPaint&&selectedOpt&&selectedOpt.name!=="Нет"&&area>0&&<div style={{background:"var(--bg)",borderRadius:10,padding:10,marginTop:4,border:"1px solid var(--border)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:6}}>
             <span style={{color:"var(--text-muted)"}}>🎨 Краска (1л/7м²)</span>
-            <span style={{fontFamily:"var(--mono)",fontWeight:700,color:"var(--success)"}}>{(Math.ceil(area/7*100)/100)} л.</span>
+            <span style={{fontFamily:"var(--mono)",fontWeight:700,color:"var(--success)"}}>{Math.round(area/7*100)/100} л.</span>
           </div>
+          <input placeholder="Название краски / цвет колеровки" value={(sel[tabId]||{})._paintName||""} onChange={e=>setExtra("_paintName",e.target.value)}
+            style={{width:"100%",padding:"7px 10px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"var(--font)",fontSize:12,outline:"none",boxSizing:"border-box"}}/>
         </div>}
 
         {/* Стандартные открытые — НЕ для остекления, НЕ для сайдинга, НЕ для отделки */}
-        {!isFinish&&!isInsul&&!isPaint&&!isFrame&&!isBB&&!isWin&&!isSidingCat&&visibleMats.map(om=>{
+        {!isFinish&&!isInsul&&!isPaint&&!isFrame&&!isBB&&!isWin&&!isSidingCat&&!isRoof&&visibleMats.map(om=>{
           if(isRemoved(cat.id,om.id))return(<div key={om.id} style={{padding:"3px 10px",fontSize:12,color:"var(--text-dim)",background:"var(--bg)",borderRadius:8,marginBottom:2,display:"flex",justifyContent:"space-between",opacity:.5}}>
             <span style={{textDecoration:"line-through"}}>{om.materials?.name}</span>
             <button onClick={()=>toggleRemove(cat.id,om.id)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:11}}>↩</button>
@@ -1127,7 +1310,7 @@ function DynTab({tabId,db,sel,setSel}){
         })}
 
         {/* Скрытые (авто) — стандартные, с calc_mode */}
-        {!isFrame&&!isBB&&!isWin&&!isSidingCat&&hiddenMats.length>0&&(()=>{
+        {!isFrame&&!isBB&&!isWin&&!isSidingCat&&!isRoof&&hiddenMats.length>0&&(()=>{
           const hMm=dims.height||0, wMm=dims.length||0;
           const hM=hMm/1000, wM=wMm/1000;
           const perimM=hM>0&&wM>0?2*(hM+wM):0;
@@ -1210,28 +1393,63 @@ function parseDims(s){
 }
 
 // ── Calculate material qty based on type and direction ──
-// isLinear=true (длиномер: вагонка, панели): кол-во = стена / ширина_материала
-// isLinear=false (листовой: ламинат, плитка): кол-во = площадь_стены / площадь_листа + 10%
+// isLinear=true (длиномер: вагонка, панели)
+// isLinear=false (листовой: ламинат, плитка): площадь_стены / площадь_листа + 10%
 function calcMatQty(heightMm, widthMm, matDims, direction, isLinear){
   const md=parseDims(matDims);
   if(md.s<=0)return 0;
   const linear=(isLinear===undefined||isLinear===null)?true:isLinear;
+  const matLength=md.d||3000; // длина материала в мм (по умолчанию 3000)
+  const matWidth=md.s; // ширина материала в мм
 
   if(linear){
-    // Длиномер: делим размер стены на ширину материала
     const dir=direction||"vertical";
+    // Вертикально: вагонка стоит вертикально
+    //   Полос = ширина_стены / ширина_вагонки
+    //   По высоте: сколько кусков в одну полосу?
+    //     Если высота <= длина_мат → 1 кусок (обрезок не используется)
+    //     Если высота > длина_мат → нужно несколько кусков
+    //       Сначала ставим целые, потом остаток
+    //       Обрезок = длина_мат - (высота % длина_мат)
+    //       Если обрезок >= высоты/2 → можно переиспользовать (делится на 2 части)
+    // Горизонтально: аналогично но оси меняются
+
+    let spanDim, crossDim; // spanDim = направление укладки, crossDim = перпендикуляр
     if(dir==="vertical"){
-      return Math.ceil(widthMm/md.s);
+      spanDim=heightMm; // вагонка идёт по высоте
+      crossDim=widthMm; // полосы считаем по ширине
     }else{
-      return Math.ceil(heightMm/md.s);
+      spanDim=widthMm; // вагонка идёт по ширине
+      crossDim=heightMm; // полосы считаем по высоте
+    }
+
+    const strips=Math.ceil(crossDim/matWidth); // кол-во полос
+    
+    if(spanDim<=matLength){
+      // Одна вагонка покрывает всю длину — просто кол-во полос
+      return strips;
+    }else{
+      // Стена длиннее материала — нужно стыковать
+      // Сколько целых кусков в одну полосу
+      const fullPieces=Math.floor(spanDim/matLength);
+      const remainder=spanDim-fullPieces*matLength; // остаток
+      const cutoff=matLength-remainder; // обрезок от последнего куска
+      
+      // Проверяем: можно ли обрезок использовать для другой полосы?
+      // Если cutoff >= remainder → из одного целого куска получаем 2 остатка
+      // Упрощённо: считаем общую длину всех полос и делим на длину материала
+      const totalLength=strips*spanDim; // общая длина в мм
+      const piecesRaw=totalLength/matLength;
+      
+      // +5% на стыки и отходы
+      return Math.ceil(piecesRaw*1.05);
     }
   }else{
     // Не длиномер (площадной): площадь стены / площадь листа + 10% на отходы
     const wallArea=heightMm*widthMm; // мм²
     const matArea=md.d*md.s; // мм²
     if(matArea<=0)return 0;
-    const raw=wallArea/matArea;
-    return Math.ceil(raw*1.1); // +10% отходы
+    return Math.ceil(wallArea/matArea*1.1);
   }
 }
 
@@ -1260,128 +1478,136 @@ function doCalc(sel,db){
 
     const hasWindow=isMainWall&&ts._hasWindow;
     const needOtkos=isMainWall&&ts._needOtkos;
-    const windowAreaSqm=(2000/1000)*(1300/1000);
+    const bbWidthMm=ts._bbW||2000;
+    const bbHeightMm=ts._bbH||1300;
+    const windowAreaSqm=(bbWidthMm/1000)*(bbHeightMm/1000);
     const areaSqm=hasWindow?Math.max(0,rawAreaSqm-windowAreaSqm):rawAreaSqm;
 
     // ── Остекление ──
     if(tab.id==="glazing"){
       const tabCats=db.categories.filter(c=>c.tab_id==="glazing");
-      // Инфо-строка: что делаем + рама
-      const whatCat=tabCats.find(c=>{const n=c.name.toLowerCase();return n.includes("что дел")||n.includes("вариант")});
-      const whatOpt=whatCat&&ts[whatCat.id]?db.options.find(o=>o.id===ts[whatCat.id]):null;
-      const frameCat=tabCats.find(c=>{const n=c.name.toLowerCase();return n.includes("основная рама")||n==="рама"});
-      const frameOpt=frameCat&&ts[frameCat.id]?db.options.find(o=>o.id===ts[frameCat.id]):null;
-      if(whatOpt||frameOpt){
-        const desc=[(whatOpt?.name||""),(frameOpt?.name||"")].filter(Boolean).join(" — ");
-        if(desc)items.push({name:"Остекление: "+desc,qty:1,unit:"компл.",price:0,cost:0,auto:false,isInfo:true});
-      }
-
-      // Функция расчёта по режиму → количество в штуках
-      const calcInstall=(baseQty,mat,mode,dims)=>{
+      
+      // Универсальная функция расчёта по calc_mode
+      const calcByMode=(baseQty,mat,mode,hMm,wMm)=>{
         if(!baseQty||baseQty<=0)return 0;
-        const hMm=dims?.height||0, wMm=dims?.length||0;
-        const hM=hMm/1000, wM=wMm/1000;
+        const hM=hMm/1000,wM=wMm/1000;
         const perimM=hM>0&&wM>0?2*(hM+wM):0;
-        if(hMm<=0&&wMm<=0&&mode!=="fixed")return 0;
-        
-        // Перевод п.м. в штуки
-        const toSht=(pm)=>{
-          if(pm<=0)return 0;
-          const md=parseDims(mat?.dimensions);
-          if(md.d>0)return Math.ceil(pm/(md.d/1000));
-          return Math.ceil(pm);
-        };
-
+        const toSht=(pm)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
         if(mode==="fixed")return baseQty;
         if(mode==="width"||mode==="width_top")return toSht(baseQty*wM);
         if(mode==="height")return toSht(baseQty*hM*2);
         if(mode==="per_sqm")return Math.ceil(baseQty*hM*wM);
-        if(mode==="step"){
-          const stepMm=baseQty;
-          const dir=ts._dir||"vertical";
-          let strips,stripLen;
-          if(dir==="vertical"){strips=Math.floor(wMm/stepMm)+1;stripLen=hMm}
-          else{strips=Math.floor(hMm/stepMm)+1;stripLen=wMm}
-          return toSht(strips*stripLen/1000);
-        }
-        if(mode==="area_sheet"){
-          const md=parseDims(mat?.dimensions);
-          const matA=md.d*md.s/1e6;
-          if(matA>0)return Math.ceil(hM*wM/matA*1.1*baseQty);
-          return baseQty;
-        }
-        // perim
+        if(mode==="step"){let st,sl;st=Math.floor(wMm/baseQty)+1;sl=hMm;return toSht(st*sl/1000)}
+        if(mode==="area_sheet"){const md=parseDims(mat?.dimensions);const ma=md.d*md.s/1e6;if(ma>0)return Math.ceil(hM*wM/ma*1.1*baseQty);return baseQty}
         return toSht(baseQty*perimM);
       };
-
-      // Обработка скрытых категорий «Материалы для установки ...»
-      const processInstallCat=(catNamePart,dimsKey)=>{
-        const d=ts[dimsKey]||{height:0,length:0};
-        tabCats.filter(c=>c.name.toLowerCase().includes("материалы для установки")&&c.name.toLowerCase().includes(catNamePart)).forEach(ic=>{
-          const icOpts=db.options.filter(o=>o.category_id===ic.id);
-          const icOpt=icOpts[0];if(!icOpt)return;
-          db.optionMaterials.filter(om=>om.option_id===icOpt.id).forEach(om=>{
-            const mat=om.materials;if(!mat)return;
-            if(ts["_rm_"+ic.id+"_"+om.id])return;
-            const base=om.quantity||0;
-            const mode=om.calc_mode||"perim";
-            const auto=calcInstall(base,mat,mode,d);
-            const uq=ts["_q_"+ic.id+"_"+om.material_id];
-            const qty=uq!==undefined?uq:auto;
-            if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
-          });
+      
+      // Обработка привязанных материалов для категории
+      const processCatMats=(catName,hMm,wMm,label)=>{
+        const cat=tabCats.find(c=>c.name.toLowerCase().includes(catName));
+        if(!cat)return;
+        const optId=ts[cat.id];if(!optId)return;
+        const opt=db.options.find(o=>o.id===optId);
+        if(!opt||opt.name==="Нет"||opt.name==="НЕТ")return;
+        if(label)items.push({name:label+": "+opt.name,qty:1,unit:"компл.",price:0,cost:0,auto:false,isInfo:true});
+        db.optionMaterials.filter(om=>om.option_id===optId).forEach(om=>{
+          const mat=om.materials;if(!mat)return;
+          if(ts["_rm_"+cat.id+"_"+om.id])return;
+          const base=om.quantity||0;
+          const mode=om.calc_mode||"fixed";
+          const auto=calcByMode(base,mat,mode,hMm,wMm);
+          const uq=ts["_q_"+cat.id+"_"+om.material_id];
+          const qty=uq!==undefined?uq:auto;
+          if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
         });
       };
 
       // Основная Рама
-      if(frameOpt&&frameOpt.name!=="Нет"&&frameOpt.name!=="НЕТ"){
-        processInstallCat("основная рама","_glazingDims");
-      }
+      const gd=ts._glazingDims||{height:0,length:0};
+      processCatMats("основная рама",gd.height,gd.length,"Остекление");
 
-      // Замена балконного блока
+      // Замена балконного блока — Дверь + Окно
       const bbCat=tabCats.find(c=>c.name.toLowerCase().includes("балконн"));
-      const bbOpt=bbCat&&ts[bbCat.id]?db.options.find(o=>o.id===ts[bbCat.id]):null;
-      if(bbOpt&&bbOpt.name!=="Нет"&&bbOpt.name!=="НЕТ"){
-        items.push({name:"Замена балк.блока: "+bbOpt.name,qty:1,unit:"компл.",price:0,cost:0,auto:false,isInfo:true});
-        processInstallCat("балконн","_bbDims");
+      if(bbCat){
+        const bbOptId=ts[bbCat.id];
+        const bbOpt=bbOptId?db.options.find(o=>o.id===bbOptId):null;
+        if(bbOpt&&bbOpt.name!=="Нет"&&bbOpt.name!=="НЕТ"){
+          const doorH=ts._bbDoorH||2100,doorW=ts._bbDoorW||700;
+          const winH2=ts._bbWinH||1400,winW2=ts._bbWinW||900;
+          const maxH=Math.max(doorH,winH2);
+          const totalW=doorW+winW2;
+          // Используем общие размеры для расчёта
+          items.push({name:"Замена балк.блока",qty:1,unit:"компл.",price:0,cost:0,auto:false,isInfo:true});
+          db.optionMaterials.filter(om=>om.option_id===bbOptId).forEach(om=>{
+            const mat=om.materials;if(!mat)return;
+            if(ts["_rm_"+bbCat.id+"_"+om.id])return;
+            const base=om.quantity||0;const mode=om.calc_mode||"fixed";
+            const auto=calcByMode(base,mat,mode,maxH,totalW);
+            const uq=ts["_q_"+bbCat.id+"_"+om.material_id];
+            const qty=uq!==undefined?uq:auto;
+            if(qty>0)items.push({name:mat.name,qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+          });
+        }
       }
 
-      // Окно
-      const winCat=tabCats.find(c=>{const n=c.name.toLowerCase();return n.includes("окно")&&!n.includes("материалы")});
-      const winOpt=winCat&&ts[winCat.id]?db.options.find(o=>o.id===ts[winCat.id]):null;
-      if(winOpt&&winOpt.name!=="Нет"&&winOpt.name!=="НЕТ"){
-        items.push({name:"Окно: "+winOpt.name,qty:1,unit:"компл.",price:0,cost:0,auto:false,isInfo:true});
-        processInstallCat("окно","_winDims");
+      // Окна — массив окон, суммируем
+      const winCat=tabCats.find(c=>{const n=c.name.toLowerCase();return n.includes("окно")&&!n.includes("материалы")&&!n.includes("балконн")});
+      if(winCat){
+        const winOptId=ts[winCat.id];
+        const winOpt=winOptId?db.options.find(o=>o.id===winOptId):null;
+        if(winOpt&&winOpt.name!=="Нет"&&winOpt.name!=="НЕТ"){
+          const windows=ts._windows||[{h:1400,w:1200}];
+          let totalP=0,totalA=0,totalW=0,totalH=0;
+          windows.forEach(w=>{totalP+=2*(w.h/1000+w.w/1000);totalA+=(w.h/1000)*(w.w/1000);totalW+=w.w/1000;totalH+=w.h/1000});
+          items.push({name:"Окна ("+windows.length+" шт.)",qty:windows.length,unit:"компл.",price:0,cost:0,auto:false,isInfo:true});
+          db.optionMaterials.filter(om=>om.option_id===winOptId).forEach(om=>{
+            const mat=om.materials;if(!mat)return;
+            if(ts["_rm_"+winCat.id+"_"+om.id])return;
+            const base=om.quantity||0;const mode=om.calc_mode||"fixed";
+            const toSht=(pm)=>{if(pm<=0)return 0;const md=parseDims(mat?.dimensions);return md.d>0?Math.ceil(pm/(md.d/1000)):Math.ceil(pm)};
+            let qty=base;
+            if(mode==="fixed")qty=base*windows.length;
+            else if(mode==="perim")qty=toSht(base*totalP);
+            else if(mode==="per_sqm")qty=Math.ceil(base*totalA);
+            else if(mode==="width"||mode==="width_top")qty=toSht(base*totalW);
+            else if(mode==="height")qty=toSht(base*totalH*2);
+            const uq=ts["_q_"+winCat.id+"_"+om.material_id];
+            const q=uq!==undefined?uq:qty;
+            if(q>0)items.push({name:mat.name,qty:q,unit:mat.unit,price:mat.price||0,cost:q*(mat.price||0),auto:!om.visible});
+          });
+        }
       }
 
-      // Сайдинг: чистовой + черновые из шаблонов
+      // Крыша
+      const roofCat=tabCats.find(c=>c.name.toLowerCase().includes("крыш"));
+      if(roofCat){
+        const roofOptId=ts[roofCat.id];
+        const roofOpt=roofOptId?db.options.find(o=>o.id===roofOptId):null;
+        if(roofOpt&&roofOpt.name!=="Нет"&&roofOpt.name!=="НЕТ"){
+          const rd=ts._roofDims||{height:0,length:0};
+          processCatMats("крыш",rd.height,rd.length,"Крыша");
+        }
+      }
+
+      // Сайдинг
       const sidCat=tabCats.find(c=>c.name.toLowerCase().includes("сайдинг"));
       const sidOpt=sidCat&&ts[sidCat.id]?db.options.find(o=>o.id===ts[sidCat.id]):null;
       const sidName=(sidOpt?.name||"").toLowerCase();
       if(sidOpt&&sidName!=="нет"&&sidName!==""){
         const sDims=ts._sidingDims||{height:0,length:0};
-        const sDir=ts._sidingDir||"horizontal";
         const sH=sDims.height||0;const sW=sDims.length||0;
         const sArea=(sH/1000)*(sW/1000);
         if(sArea>0){
-          const sidMats=db.optionMaterials.filter(om=>om.option_id===sidOpt.id);
-          sidMats.forEach(om=>{
+          db.optionMaterials.filter(om=>om.option_id===sidOpt.id).forEach(om=>{
             const mat=om.materials;if(!mat)return;
-            const qty=calcMatQty(sH,sW,mat.dimensions,sDir,mat.is_linear);
+            const qty=calcMatQty(sH,sW,mat.dimensions,ts._sidingDir||"horizontal",mat.is_linear);
             if(qty>0)items.push({name:mat.name+" (сайдинг)",qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
           });
         }
       }
     }
 
-    // Откосы и подоконник
-    if(isMainWall&&needOtkos){
-      items.push({name:"Подоконник ПВХ 2000 мм",qty:1,unit:"шт.",price:0,cost:0,auto:true});
-      items.push({name:"Панель откоса ПВХ",qty:3,unit:"шт.",price:0,cost:0,auto:true});
-      items.push({name:"F-профиль для откосов",qty:3,unit:"шт.",price:0,cost:0,auto:true});
-      items.push({name:"Стартовый профиль откоса",qty:3,unit:"шт.",price:0,cost:0,auto:true});
-      items.push({name:"Пена монтажная (откосы)",qty:1,unit:"шт.",price:0,cost:0,auto:true});
-    }
+    // Откосы и подоконник — добавляются через справочник как отдельная категория
 
     const cats=db.categories.filter(c=>c.tab_id===tab.id);
     cats.forEach(cat=>{
@@ -1460,8 +1686,9 @@ function doCalc(sel,db){
 
       // Покраска
       if(isSurface&&cat.name==="Покраска"&&areaSqm>0){
-        const pq=Math.ceil(areaSqm/7*100)/100;
-        if(pq>0)items.push({name:"Краска",qty:pq,unit:"л.",price:0,cost:0,auto:true});
+        const pq=Math.round(areaSqm/7*100)/100;
+        const paintName=ts._paintName||"";
+        if(pq>0)items.push({name:"Краска"+(paintName?" ("+paintName+")":""),qty:pq,unit:"л.",price:0,cost:0,auto:true});
         return;
       }
 
@@ -2194,13 +2421,29 @@ function App(){
   const[orderInfo,setOI]=useState({order_number:"",address:"",phone:""});
   const[collapseKey,setCollapseKey]=useState(0);
   const[showOrders,setShowOrders]=useState(false);
+  const[editingOrderId,setEditingOrderId]=useState(null);
 
   const notify=useCallback((msg,type="ok")=>setNotif({msg,type}),[]);
   const refresh=useCallback(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}},[]);
   useEffect(()=>{window._refreshDb=refresh},[refresh]);
   useEffect(()=>{(async()=>{try{setDb(await loadAll())}catch(e){notify(e.message,"error")}setLoading(false)})()},[]);
 
-  // Автонумерация заказов
+  // Автосохранение в localStorage
+  const LS_KEY="k2_draft";
+  useEffect(()=>{
+    try{
+      const saved=localStorage.getItem(LS_KEY);
+      if(saved){
+        const d=JSON.parse(saved);
+        if(d.sel&&Object.keys(d.sel).length>0)setSel(d.sel);
+        if(d.oi)setOI(p=>({...p,address:d.oi.address||"",phone:d.oi.phone||""}));
+        if(d.editId)setEditingOrderId(d.editId);
+      }
+    }catch(e){}
+  },[]);
+  useEffect(()=>{
+    try{localStorage.setItem(LS_KEY,JSON.stringify({sel,oi:orderInfo,editId:editingOrderId}))}catch(e){}
+  },[sel,orderInfo,editingOrderId]);
   useEffect(()=>{
     (async()=>{
       try{
@@ -2222,8 +2465,15 @@ function App(){
     if(!results)return;
     try{
       const total=Object.values(results).flat().reduce((s,r)=>s+(r.cost||0),0);
-      await sb.from("orders").insert({order_number:orderInfo.order_number,address:orderInfo.address,phone:orderInfo.phone,form_data:sel,results,total_cost:total});
-      notify("Заказ сохранён!");
+      const data={order_number:orderInfo.order_number,address:orderInfo.address,phone:orderInfo.phone,form_data:sel,results,total_cost:total};
+      if(editingOrderId){
+        if(!confirm("Перезаписать заказ №"+orderInfo.order_number+"?"))return;
+        await sb.from("orders").update(data).eq("id",editingOrderId);
+        notify("Заказ №"+orderInfo.order_number+" обновлён!");
+      }else{
+        await sb.from("orders").insert(data);
+        notify("Новый заказ сохранён!");
+      }
     }catch(e){notify(e.message,"error")}
   };
 
@@ -2313,10 +2563,11 @@ function App(){
           <OrdersSection notify={notify} onLoadOrder={(o)=>{
             setSel(o.form_data||{});
             setOI({order_number:o.order_number||"",address:o.address||"",phone:o.phone||""});
+            setEditingOrderId(o.id);
             setResults(null);
             setShowSum(false);
             setShowOrders(false);
-            notify("Заказ загружен для редактирования");
+            notify("Заказ №"+o.order_number+" загружен для редактирования");
           }}/>
         </div>
       </div>
