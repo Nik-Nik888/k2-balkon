@@ -933,7 +933,65 @@ function DynTab({tabId,db,sel,setSel}){
     </div>);
   };
 
+  const isFurniture=tabId==="furniture";
+  const furnitureItems=(sel[tabId]||{})._furnitureItems||[];
+  const setFurnitureItems=(items)=>setSel(p=>({...p,[tabId]:{...p[tabId],_furnitureItems:items}}));
+  const addFurniture=()=>setFurnitureItems([...furnitureItems,{catSelections:{}}]);
+  const rmFurniture=(i)=>setFurnitureItems(furnitureItems.filter((_,j)=>j!==i));
+  const updFurnitureCat=(i,catId,optId)=>{const n=[...furnitureItems];n[i]={...n[i],catSelections:{...n[i].catSelections,[catId]:optId?Number(optId):null}};setFurnitureItems(n)};
+  // Название позиции — из выбранных вариантов
+  const getFurnitureName=(fi)=>{
+    const names=[];
+    tabCats.forEach(cat=>{
+      const optId=fi.catSelections[cat.id];
+      if(optId){const opt=db.options.find(o=>o.id===optId);if(opt&&opt.name!=="Нет")names.push(opt.name)}
+    });
+    return names.join(" / ")||"Не выбрано";
+  };
+
   return(<div>
+    {/* ── Мебель: несколько позиций ── */}
+    {isFurniture&&<div>
+      {furnitureItems.map((fi,idx)=>{
+        const posName=getFurnitureName(fi);
+        const totalCost=tabCats.reduce((sum,cat)=>{
+          const optId=fi.catSelections[cat.id];if(!optId)return sum;
+          return sum+db.optionMaterials.filter(om=>om.option_id===optId).reduce((s,om)=>s+(om.quantity||0)*(om.materials?.price||0),0);
+        },0);
+        return(<div key={idx} style={{background:"var(--bg)",borderRadius:12,padding:12,marginBottom:10,border:"1px solid var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <span style={{fontSize:14,fontWeight:600,color:"var(--accent)"}}>🪑 {posName}</span>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              {totalCost>0&&<span style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--success)",fontWeight:700}}>{totalCost.toLocaleString("ru")}₽</span>}
+              <button onClick={()=>rmFurniture(idx)} style={{background:"none",border:"none",color:"var(--danger)",cursor:"pointer",fontSize:14}}>✕</button>
+            </div>
+          </div>
+          {tabCats.map(cat=>{
+            const allOpts=db.options.filter(o=>o.category_id===cat.id);
+            const selOptId=fi.catSelections[cat.id]||null;
+            const selOpt=allOpts.find(o=>o.id===selOptId);
+            const mats=selOpt?db.optionMaterials.filter(om=>om.option_id===selOpt.id):[];
+            return(<div key={cat.id} style={{marginBottom:8}}>
+              <Sl label={cat.name} value={selOptId||""} onChange={v=>updFurnitureCat(idx,cat.id,v)}
+                options={[{value:"",label:"— Не выбрано —"},...allOpts.map(o=>({value:o.id,label:o.name}))]}/>
+              {mats.length>0&&<div style={{marginTop:2}}>
+                {mats.map(om=>(
+                  <div key={om.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 12px",fontSize:12,color:"var(--text-muted)"}}>
+                    <span style={{flex:1}}>{om.materials?.name}</span>
+                    <span style={{fontFamily:"var(--mono)",fontSize:11}}>{om.quantity} {om.materials?.unit}</span>
+                    {om.materials?.price>0&&<span className="price-tag" style={{fontSize:10}}>{om.materials.price}₽</span>}
+                    {om.materials?.price>0&&om.quantity>0&&<span className="cost-tag" style={{fontSize:10}}>={((om.materials.price||0)*(om.quantity||0)).toLocaleString("ru")}₽</span>}
+                  </div>
+                ))}
+              </div>}
+            </div>);
+          })}
+        </div>);
+      })}
+      <button onClick={addFurniture} style={{padding:"10px 20px",borderRadius:10,background:"var(--accent-soft)",color:"var(--accent)",border:"1px solid var(--accent)",fontFamily:"var(--font)",fontSize:13,fontWeight:600,cursor:"pointer",marginBottom:14}}>＋ Добавить мебель</button>
+      {furnitureItems.length===0&&<div style={{color:"var(--text-dim)",fontSize:13,padding:16,textAlign:"center"}}>Нажмите «＋ Добавить мебель» чтобы добавить позицию</div>}
+    </div>}
+
     {/* ── Поверхности (стены, потолок, пол) ── */}
     {isSurface&&<div style={{marginBottom:14}}>
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:8}}>
@@ -1628,6 +1686,31 @@ function doCalc(sel,db){
     }
 
     // Откосы и подоконник — добавляются через справочник как отдельная категория
+
+    // ── Мебель: массив позиций ──
+    if(tab.id==="furniture"){
+      const furnitureItems=ts._furnitureItems||[];
+      furnitureItems.forEach((fi,idx)=>{
+        // Собираем название из выбранных вариантов
+        const names=[];
+        Object.entries(fi.catSelections||{}).forEach(([catId,optId])=>{
+          if(!optId)return;
+          const opt=db.options.find(o=>o.id===Number(optId));
+          if(opt&&opt.name!=="Нет")names.push(opt.name);
+        });
+        const label=names.join(" / ")||("Позиция "+(idx+1));
+        Object.entries(fi.catSelections||{}).forEach(([catId,optId])=>{
+          if(!optId)return;
+          const opt=db.options.find(o=>o.id===Number(optId));
+          if(!opt||opt.name==="Нет")return;
+          db.optionMaterials.filter(om=>om.option_id===Number(optId)).forEach(om=>{
+            const mat=om.materials;if(!mat)return;
+            const qty=om.quantity||0;
+            if(qty>0)items.push({name:mat.name+" ("+label+")",qty,unit:mat.unit,price:mat.price||0,cost:qty*(mat.price||0),auto:!om.visible});
+          });
+        });
+      });
+    }
 
     const cats=db.categories.filter(c=>c.tab_id===tab.id);
     cats.forEach(cat=>{
@@ -2494,6 +2577,15 @@ function App(){
         await sb.from("orders").insert(data);
         notify("Новый заказ сохранён!");
       }
+      // Сброс после сохранения
+      setSel({});
+      setResults(null);
+      setShowSum(false);
+      setEditingOrderId(null);
+      localStorage.removeItem(LS_KEY);
+      // Новый номер
+      const num=parseInt(String(orderInfo.order_number).replace(/\D/g,""))||0;
+      setOI({order_number:String(num+1),address:"",phone:""});
     }catch(e){notify(e.message,"error")}
   };
 
