@@ -706,10 +706,17 @@ function DynTab({tabId,db,sel,setSel}){
   const dims=(sel[tabId]||{})._dims||{length:0,height:0};
   const dir=(sel[tabId]||{})._dir||"vertical";
   const hasWindow=(sel[tabId]||{})._hasWindow||false;
-  const needOtkos=(sel[tabId]||{})._needOtkos||false;
-  const bbW=(sel[tabId]||{})._bbW||2000;
-  const bbH=(sel[tabId]||{})._bbH||1300;
-  const windowArea=(bbW/1000)*(bbH/1000);
+  // Балконный блок: Дверь + Окно (6 сторон)
+  const bbDoorH=(sel[tabId]||{})._mwBbDoorH||2100;
+  const bbDoorW=(sel[tabId]||{})._mwBbDoorW||700;
+  const bbWinH=(sel[tabId]||{})._mwBbWinH||1400;
+  const bbWinW=(sel[tabId]||{})._mwBbWinW||900;
+  const bbDoorA=(bbDoorH/1000)*(bbDoorW/1000);
+  const bbWinA=(bbWinH/1000)*(bbWinW/1000);
+  const windowArea=bbDoorA+bbWinA;
+  const bbMaxH=Math.max(bbDoorH,bbWinH);
+  const bbTotalW=bbDoorW+bbWinW;
+  const bbPerim=2*(bbMaxH/1000)+(bbDoorW/1000)+(bbWinW/1000)+Math.abs(bbDoorH-bbWinH)/1000;
   const rawArea=isSurface?(dims.length/1000)*(dims.height/1000):0;
   const area=isSurface?(isMainWall&&hasWindow?Math.max(0,rawArea-windowArea):rawArea):0;
 
@@ -942,15 +949,28 @@ function DynTab({tabId,db,sel,setSel}){
       </div>
       {isMainWall&&<div style={{marginBottom:10,background:"var(--bg)",borderRadius:10,padding:10,border:"1px solid var(--border)"}}>
         <Tog label="🪟 Есть балконный блок" value={hasWindow} onChange={v=>setExtra("_hasWindow",v)}/>
-        {hasWindow&&<div style={{marginLeft:20}}>
-          <div style={{display:"flex",gap:8,marginBottom:6,flexWrap:"wrap"}}>
-            <NI label="Ширина ББ (мм)" value={bbW} onChange={v=>setExtra("_bbW",v)} unit="мм"/>
-            <NI label="Высота ББ (мм)" value={bbH} onChange={v=>setExtra("_bbH",v)} unit="мм"/>
-            <div style={{background:"var(--accent-soft)",color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12,fontWeight:700,padding:"8px 12px",borderRadius:10,alignSelf:"flex-end",marginBottom:8}}>
-              Вычет: {windowArea.toFixed(2)} м²
+        {hasWindow&&<div style={{marginTop:6}}>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:6}}>
+            <div>
+              <div style={{fontSize:11,color:"var(--text-dim)",marginBottom:2,fontWeight:600}}>🚪 Дверь</div>
+              <div style={{display:"flex",gap:6}}>
+                <NI label="H мм" value={bbDoorH} onChange={v=>setExtra("_mwBbDoorH",v)}/>
+                <NI label="W мм" value={bbDoorW} onChange={v=>setExtra("_mwBbDoorW",v)}/>
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:"var(--text-dim)",marginBottom:2,fontWeight:600}}>🪟 Окно</div>
+              <div style={{display:"flex",gap:6}}>
+                <NI label="H мм" value={bbWinH} onChange={v=>setExtra("_mwBbWinH",v)}/>
+                <NI label="W мм" value={bbWinW} onChange={v=>setExtra("_mwBbWinW",v)}/>
+              </div>
             </div>
           </div>
-          <Tog label="Нужны откосы + подоконник" value={needOtkos} onChange={v=>setExtra("_needOtkos",v)}/>
+          <div style={{display:"flex",gap:10,fontSize:12,fontFamily:"var(--mono)",color:"var(--accent)",background:"var(--accent-soft)",padding:"6px 10px",borderRadius:8}}>
+            <span>Вычет S = {windowArea.toFixed(2)} м²</span>
+            <span>P ≈ {bbPerim.toFixed(2)} м</span>
+            <span>({bbDoorW}+{bbWinW} = {bbTotalW} мм)</span>
+          </div>
         </div>}
       </div>}
       {!isFloor&&!dims.height&&mainH>0&&tabId!=="main_wall"&&<div onClick={()=>setDim("height",mainH)} style={{fontSize:11,color:"var(--accent)",cursor:"pointer",marginBottom:6,padding:"4px 8px",background:"var(--accent-soft)",borderRadius:8,display:"inline-block"}}>💡 Высота как на главной: {mainH} мм</div>}
@@ -1477,10 +1497,10 @@ function doCalc(sel,db){
     const rawAreaSqm=(heightMm/1000)*(widthMm/1000);
 
     const hasWindow=isMainWall&&ts._hasWindow;
-    const needOtkos=isMainWall&&ts._needOtkos;
-    const bbWidthMm=ts._bbW||2000;
-    const bbHeightMm=ts._bbH||1300;
-    const windowAreaSqm=(bbWidthMm/1000)*(bbHeightMm/1000);
+    // Балконный блок: Дверь + Окно
+    const mwDoorH=ts._mwBbDoorH||2100,mwDoorW=ts._mwBbDoorW||700;
+    const mwWinH=ts._mwBbWinH||1400,mwWinW=ts._mwBbWinW||900;
+    const windowAreaSqm=(mwDoorH/1000)*(mwDoorW/1000)+(mwWinH/1000)*(mwWinW/1000);
     const areaSqm=hasWindow?Math.max(0,rawAreaSqm-windowAreaSqm):rawAreaSqm;
 
     // ── Остекление ──
